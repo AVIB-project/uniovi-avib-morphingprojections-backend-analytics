@@ -1,6 +1,6 @@
 # uniovi-avib-morphingprojections-backend-analytics
 
-Uniovi AVIB Morphing Projection Backend Analytic Services.
+Uniovi AVIB Morphing Projection Backend Analytic Service.
 
 
 ## Note
