@@ -59,6 +59,13 @@ $ pip list --format=freeze > requirements.txt
 $ pip install -e .
 ```
 
+**STEP06**: Manage docker images and run
+
+```
+$ docker build -t uniovi-avib-morphingprojections-backend-analytics .
+$ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
+```
+
 **NOTE**: If you regenerate your requirements this local dependency will be added in the requirements file, 
 be carefoul to not push this change
 
