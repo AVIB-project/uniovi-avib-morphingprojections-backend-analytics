@@ -51,26 +51,14 @@ $ pip install flask
 $ pip freeze > requirements.txt
 ```
 
-**STEP05**: For local testing and debugging install in development mode your python project
-
-```
-$ pip install -e .
-```
-
-**NOTE**: If you regenerate later your requirements because you add new python packages, this local dependency will be added in the requirement file, be careful to not push this change, or remove the local package previous to push again the requirement file like this. Later install locally again to continue testing and debugging.
-
-```
-pip uninstall uniovi-avib-morphingprojections-backend-analytics
-```
-
-**STEP06**: Manage docker images and run
+**STEP05**: Manage docker images and run
 
 ```
 $ docker build -t uniovi-avib-morphingprojections-backend-analytics .
 $ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
 ```
 
-**STEP06**: Start service from gunicorn server
+**STEP07**: Start service from gunicorn server locally
 ```
 gunicorn --config gunicorn_config.py src.morphingprojections_backend_analytics.service:app
 ```
