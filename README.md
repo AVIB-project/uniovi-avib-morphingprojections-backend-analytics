@@ -12,11 +12,9 @@
 
 [![Project generated with PyScaffold](https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold)](https://pyscaffold.org/)
 
-# uniovi-avib-morphingprojections-backend-analytics
+# Description
 
 > Uniovi AVIB Morphing Projection Backend Analytic Service.
-
-A longer description of your project goes here...
 
 **STEP01**: Scaffolding your python project:
 
