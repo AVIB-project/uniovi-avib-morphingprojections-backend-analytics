@@ -46,15 +46,21 @@ $ pip install seaborn
 $ pip install flask
 ```
 
-**STEP04**: generate the requirements witl all python packages dependecies
+**STEP04**: generate the requirements with all python package dependencies
 ```
-$ pip list --format=freeze > requirements.txt
+$ pip freeze > requirements.txt
 ```
 
-**STEP05**: Install in development mode your python package to test and debug locally
+**STEP05**: For local testing and debugging install in development mode your python project
 
 ```
 $ pip install -e .
+```
+
+**NOTE**: If you regenerate later your requirements because you add new python packages, this local dependency will be added in the requirement file, be careful to not push this change, or remove the local package previous to push again the requirement file like this. Later install locally again to continue testing and debugging.
+
+```
+pip uninstall uniovi-avib-morphingprojections-backend-analytics
 ```
 
 **STEP06**: Manage docker images and run
@@ -63,9 +69,6 @@ $ pip install -e .
 $ docker build -t uniovi-avib-morphingprojections-backend-analytics .
 $ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
 ```
-
-**NOTE**: If you regenerate your requirements this local dependency will be added in the requirements file, 
-be carefoul to not push this change
 
 **STEP06**: Start service from gunicorn server
 ```
