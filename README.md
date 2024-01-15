@@ -18,7 +18,7 @@
 
 A longer description of your project goes here...
 
-STEP-01: Scaffolding your python project:
+**STEP01**: Scaffolding your python project:
 
 ```
 $ putup --markdown uniovi-avib-morphingprojections-backend-analytics \
@@ -26,7 +26,7 @@ $ putup --markdown uniovi-avib-morphingprojections-backend-analytics \
       -u https://gsdpi@dev.azure.com/gsdpi/avib/_git/uniovi-avib-morphingprojections-backend-analytics
 ```
 
-STEP-02: Create a virtual environment in your python project and activated it:
+**STEP02**: Create a virtual environment in your python project and activated it:
 
 ```
 $ cd uniovi-avib-morphingprojections-backend-analytics
@@ -37,7 +37,7 @@ $ source .venv/bin/activate
 (.venv) miguel@miguel-Inspiron-5502:~/git/uniovi/uniovi-avib-morphingprojections-backend-analytics$
 ```
 
-STEP03: Install development and business dependencies in your project
+**STEP03**: Install development and business dependencies in your project
 
 ```
 $ pip install tox
@@ -48,16 +48,24 @@ $ pip install seaborn
 $ pip install flask
 ```
 
-Create your requirements with our python dependencies.
-NOTE: to test and debug your app you must install in editable way your project. If you regenrate your
-requirements this local dependency will added in the requirements and later if you try to download
-the python packages from this last requirement will fail because the local dependency is not publish in any repository
-
+**STEP04**: generate the requirements witl all python packages dependecies
 ```
 $ pip list --format=freeze > requirements.txt
 ```
 
-gunicorn --config gunicorn_config.py uniovi_avib_morphingprojections_backend_analytics.service:app
+**STEP05**: Install in development mode your python package to test and debug locally
+
+```
+$ pip install -e .
+```
+
+**NOTE**: If you regenerate your requirements this local dependency will be added in the requirements file, 
+be carefoul to not push this change
+
+**STEP06**: Start service from gunicorn server
+```
+gunicorn --config gunicorn_config.py src.morphingprojections_backend_analytics.service:app
+```
 
 <!-- pyscaffold-notes -->
 
