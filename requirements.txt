@@ -8,6 +8,8 @@ colorama==0.4.6
 contourpy==1.1.1
 cycler==0.12.1
 distlib==0.3.8
+elastic-transport==8.11.0
+elasticsearch==8.11.1
 filelock==3.13.1
 flask==3.0.0
 fonttools==4.47.2
