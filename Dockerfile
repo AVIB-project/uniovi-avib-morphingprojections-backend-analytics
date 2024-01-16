@@ -14,4 +14,4 @@ WORKDIR /app
 
 EXPOSE 5000
 
-CMD ["gunicorn","--config", "gunicorn_config.py", "src.morphingprojections_backend_analytics.service:app"]
+CMD ["gunicorn","--config", "gunicorn_config.py", "--log-level=debug", "src.morphingprojections_backend_analytics.service:wsgi()"]
