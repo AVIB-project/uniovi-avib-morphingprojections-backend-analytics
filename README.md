@@ -19,7 +19,7 @@
 **STEP01**: Scaffolding your python project:
 
 ```
-$ putup --markdown uniovi-avib-morphingprojections-backend-analytics -p morphingprojections_pipelines \
+$ putup --markdown uniovi-avib-morphingprojections-backend-analytics -p morphingprojections_backend_analytics \
       -d "Uniovi AVIB Morphing Projection Backend Analytic Service." \
       -u https://gsdpi@dev.azure.com/gsdpi/avib/_git/uniovi-avib-morphingprojections-backend-analytics
 ```
