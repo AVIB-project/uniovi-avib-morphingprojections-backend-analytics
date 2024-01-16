@@ -83,6 +83,8 @@ def default_route():
     app.logger.error('this is an ERROR message')
     app.logger.critical('this is a CRITICAL message')
 
+    _logger.info("INFO LOG")
+
     return jsonify('hello world')
 
 def main(args):
@@ -96,7 +98,7 @@ def main(args):
 
     return app
 
-def wsgi():
+def wsgi():        
     return app
 
 def run():
@@ -105,6 +107,11 @@ def run():
 if __name__ != '__main__':
     gunicorn_logger = logging.getLogger('gunicorn.error')
     
+    # set gunicorn logger to module logger
+    _logger.handlers = gunicorn_logger.handlers
+    _logger.setLevel(gunicorn_logger.level)
+
+    # set gunicorn logger to flask logger
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
 
