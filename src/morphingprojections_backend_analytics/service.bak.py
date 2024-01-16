@@ -24,13 +24,25 @@ import argparse
 import logging
 import sys
 
-from flask import Flask, jsonify
+from flask import Flask
 
 __author__ = "Miguel Salinas Gancedo"
 __copyright__ = "Miguel Salinas Gancedo"
 __license__ = "MIT"
 
 _logger = logging.getLogger(__name__)
+
+# ---- Python API ----
+# The functions defined in this section can be imported by users in their
+# Python scripts/interactive interpreter, e.g. via
+# `from morphingprojections_backend_analytics.skeleton import fib`,
+# when using this Python module as a library.
+
+
+# ---- CLI ----
+# The functions defined in this section are wrappers around the main Python
+# API allowing them to be called directly from the terminal as a CLI
+# executable/script.
 
 app = Flask(__name__)
 
@@ -46,22 +58,23 @@ def parse_args(args):
     """
     parser = argparse.ArgumentParser(description="Analytics Backend services")
     parser.add_argument(
-        "-p",
-        "--port",
-        dest="port",
-        help="set server port",
-        action="store",
-        default=5000,
-    )    
-    parser.add_argument(
-        "--log-level",
+        "-v",
+        "--verbose",
         dest="loglevel",
-        help="set loglevel",
-        action="store",
-        default=logging.DEBUG,
+        help="set loglevel to INFO",
+        action="store_const",
+        const=logging.INFO,
+    )
+    parser.add_argument(
+        "-vv",
+        "--very-verbose",
+        dest="loglevel",
+        help="set loglevel to DEBUG",
+        action="store_const",
+        const=logging.DEBUG,
     )
 
-    return parser.parse_known_args()
+    return parser.parse_args(args)
 
 def setup_logging(loglevel):
     """Setup basic logging
@@ -74,39 +87,37 @@ def setup_logging(loglevel):
         level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-@app.route('/')
-def default_route():
-    """Default route"""
-    app.logger.debug('this is a DEBUG message')
-    app.logger.info('this is an INFO message')
-    app.logger.warning('this is a WARNING message')
-    app.logger.error('this is an ERROR message')
-    app.logger.critical('this is a CRITICAL message')
+@app.route("/")
+def hello_world():
+    _logger.info("hello_world endpoint request ...")
 
-    return jsonify('hello world')
+    return "<p>Hello, World!</p>"
 
 def main(args):
-    args, unknown = parse_args(args)
-    
+    args = parse_args(args)
+
     setup_logging(args.loglevel)
     
     _logger.info("Starting service ...")
-    app.run(host='0.0.0.0', port=args.port, debug=True)
+    app.run(host='0.0.0.0')
     _logger.info("Service ends here")
 
-    return app
-
-def wsgi():
-    return app
-
 def run():
-    main(sys.argv[1:])
-    
-if __name__ != '__main__':
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)
+    """Calls :func:`main` passing the CLI arguments extracted from :obj:`sys.argv`
 
-if __name__ == "__main__": 
+    This function can be used as entry point to create console scripts with setuptools.
+    """
+    main(sys.argv[1:])
+
+if __name__ == "__main__":
+    # ^  This is a guard statement that will prevent the following code from
+    #    being executed in the case someone imports this file instead of
+    #    executing it as a script.
+    #    https://docs.python.org/3/library/__main__.html
+
+    # After installing your project with pip, users can also run your Python
+    # modules as scripts via the ``-m`` flag, as defined in PEP 338::
+    #
+    #     python -m morphingprojections_backend_analytics.skeleton 42
+    #    
     run()

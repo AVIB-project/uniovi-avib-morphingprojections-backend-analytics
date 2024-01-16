@@ -60,7 +60,7 @@ $ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
 
 **STEP07**: Start service from gunicorn server locally
 ```
-gunicorn --config gunicorn_config.py src.morphingprojections_backend_analytics.service:app
+gunicorn --config gunicorn_config.py --log-level=debug 'src.morphingprojections_backend_analytics.service:wsgi()'
 ```
 
 <!-- pyscaffold-notes -->
