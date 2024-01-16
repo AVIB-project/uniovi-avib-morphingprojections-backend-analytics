@@ -51,16 +51,22 @@ $ pip install flask
 $ pip freeze > requirements.txt
 ```
 
-**STEP05**: Manage docker images and run
-
+**STEP06**: Manage python project
 ```
-$ docker build -t uniovi-avib-morphingprojections-backend-analytics .
-$ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
+tox -e docs  # to build your documentation
+tox -e build  # to build your package distribution
 ```
 
 **STEP07**: Start service from gunicorn server locally
 ```
 gunicorn --config gunicorn_config.py --log-level=debug 'src.morphingprojections_backend_analytics.service:wsgi()'
+```
+
+**STEP08**: Manage docker images and run
+
+```
+$ docker build -t uniovi-avib-morphingprojections-backend-analytics .
+$ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
 ```
 
 <!-- pyscaffold-notes -->
