@@ -24,11 +24,15 @@ import os
 import argparse
 import logging
 import sys
+import pandas as pd
 
 from flask import Flask, jsonify, request
 #from flask.ext.cors import CORS
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, ConnectionError, RequestError, NotFoundError, helpers
+
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import MinMaxScaler
 
 __author__ = "Miguel Salinas Gancedo"
 __copyright__ = "Miguel Salinas Gancedo"
@@ -39,6 +43,8 @@ _logger = logging.getLogger(__name__)
 # Project default configuration
 PROJECT_ID = "genomic"
 INDEX_DATAMATRIX = "dataset_datamatrix"
+INDEX_SCROLL_MAX_TIME = '10s'
+INDEX_MATCH_SIZE = 9500
 
 # Database default configuration
 #ELASTIC_HOST = "https://avib-elastic:9200"
@@ -131,23 +137,81 @@ def tsne():
     global _connection_db
     global _index_name
 
-    data = request.get_json() 
-
     response = []
+    data = request.get_json() 
 
     attributes = data['attributes']
     samples = data['samples']
 
-    # filter by samples and attributes in elastic    
-    results = _connection_db.search(index=_index_name, query={
-        "terms": { "attribute": attributes}        
-    })    
+    # filter by samples and attributes in database
+    filter = {
+            "size": INDEX_MATCH_SIZE,
+            "query": {
+                "bool": {
+                    "must": []
+                }
+            }
+        }
 
-    # fill will data filtering
-    for hit in results['hits']['hits']:
-        response.append(hit["_source"])
+    if len(samples) > 0:
+        filter["bool"]["must"].append({"terms": {"sample_id": samples }})
 
-    return jsonify(result=response)
+    if len(attributes) > 0:
+        filter["query"]["bool"]["must"].append({"terms": {"attribute": attributes }})
+
+    resp = _connection_db.search(
+        index=_index_name, 
+        body = filter,
+        scroll = INDEX_SCROLL_MAX_TIME)
+
+    # keep track of pass scroll _id
+    old_scroll_id = resp['_scroll_id']
+
+    # use a 'while' iterator to loop over document 'hits'
+    expression_lst = []
+
+    while len(resp['hits']['hits']):
+        # iterate over the document hits for each 'scroll'
+        doc_count = 0
+        for doc in resp['hits']['hits']:
+            expression_lst.append(doc['_source'])
+
+            doc_count += 1            
+
+            _logger.info("DOC COUNT: %s", doc_count)
+
+        # print the total time and document count at the end
+        _logger.info("TOTAL DOC COUNT: %s", doc_count)
+
+        # print the elapsed time
+        #_logger.info("TOTAL TIME: %s seconds", time.time() - start_time)
+
+        # make a request using the Scroll API
+        resp = _connection_db.scroll(
+            scroll_id = old_scroll_id,
+            scroll = INDEX_SCROLL_MAX_TIME # length of time to keep search context
+        )
+
+        # check if there's a new scroll ID
+        if old_scroll_id != resp['_scroll_id']:
+            _logger.info("NEW SCROLL ID: %s", resp['_scroll_id'])
+
+        # keep track of pass scroll _id
+        old_scroll_id = resp['_scroll_id']
+
+    # parse dataset to be projected
+    df = pd.DataFrame(expression_lst)
+    df = df.drop("sample_type", axis = 1)
+    df = df.drop("cancer_code", axis = 1)
+    
+    dataset_expression = df.pivot(index='sample_id', columns='attribute', values='value')
+
+    tsne = TSNE(perplexity=20, learning_rate=200, n_iter=2000, n_components=2, method='barnes_hut', verbose=2, init='pca')
+
+    dataset_projection = tsne.fit_transform(dataset_expression)
+    dataset_projection_df = pd.DataFrame(dataset_projection, columns=['x', 'y'])
+
+    return dataset_projection_df.to_json()
 
 def main(args):
     global _connection_db
