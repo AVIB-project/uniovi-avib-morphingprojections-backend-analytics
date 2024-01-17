@@ -44,7 +44,7 @@ _logger = logging.getLogger(__name__)
 PROJECT_ID = "genomic"
 INDEX_DATAMATRIX = "dataset_datamatrix"
 INDEX_SCROLL_MAX_TIME = '10s'
-INDEX_MATCH_SIZE = 9500
+INDEX_MATCH_SIZE = 9000
 
 # Database default configuration
 #ELASTIC_HOST = "https://avib-elastic:9200"
@@ -140,10 +140,15 @@ def tsne():
     response = []
     data = request.get_json() 
 
-    attributes = data['attributes']
+    # recover request data
+    name = data['name']
+    description = data['description']
     samples = data['samples']
+    attributes = data['attributes']
 
     # filter by samples and attributes in database
+    _logger.info("Create database filter to recover samples from elasticsearch for %s filter", name)
+
     filter = {
             "size": INDEX_MATCH_SIZE,
             "query": {
@@ -154,10 +159,12 @@ def tsne():
         }
 
     if len(samples) > 0:
-        filter["bool"]["must"].append({"terms": {"sample_id": samples }})
+        filter["query"]["bool"]["must"].append({"terms": {"sample_id": samples }})
 
     if len(attributes) > 0:
         filter["query"]["bool"]["must"].append({"terms": {"attribute": attributes }})
+
+    _logger.info("Execute filter from elasticsearch in bulk requests")
 
     resp = _connection_db.search(
         index=_index_name, 
@@ -170,8 +177,8 @@ def tsne():
     # use a 'while' iterator to loop over document 'hits'
     expression_lst = []
 
-    while len(resp['hits']['hits']):
-        # iterate over the document hits for each 'scroll'
+    # iterate over the document hits for each 'scroll'
+    while len(resp['hits']['hits']):        
         doc_count = 0
         for doc in resp['hits']['hits']:
             expression_lst.append(doc['_source'])
@@ -180,11 +187,7 @@ def tsne():
 
             _logger.info("DOC COUNT: %s", doc_count)
 
-        # print the total time and document count at the end
         _logger.info("TOTAL DOC COUNT: %s", doc_count)
-
-        # print the elapsed time
-        #_logger.info("TOTAL TIME: %s seconds", time.time() - start_time)
 
         # make a request using the Scroll API
         resp = _connection_db.scroll(
@@ -200,18 +203,40 @@ def tsne():
         old_scroll_id = resp['_scroll_id']
 
     # parse dataset to be projected
+    _logger.info("Parse request to fit t-SNE model")
+
     df = pd.DataFrame(expression_lst)
     df = df.drop("sample_type", axis = 1)
     df = df.drop("cancer_code", axis = 1)
     
     dataset_expression = df.pivot(index='sample_id', columns='attribute', values='value')
 
-    tsne = TSNE(perplexity=20, learning_rate=200, n_iter=2000, n_components=2, method='barnes_hut', verbose=2, init='pca')
+    tsne = TSNE(perplexity=20, learning_rate=200, n_iter=500, n_components=2, method='barnes_hut', verbose=2, init='pca')
 
     dataset_projection = tsne.fit_transform(dataset_expression)
     dataset_projection_df = pd.DataFrame(dataset_projection, columns=['x', 'y'])
 
-    return dataset_projection_df.to_json()
+    # normalized between 0 and 1 the projection dataset
+    _logger.info("Normalize t-SNE projection")
+
+    scaler = MinMaxScaler()
+    dataset_projection_df = pd.DataFrame(scaler.fit_transform(dataset_projection_df), columns=['x', 'y'])
+
+    _logger.info("Parse Dataframe to json list")
+
+    dataset_projection_lst = []
+    for index in dataset_projection_df.index.values:                    
+        dataset_projection_lst.append(
+            {
+                 "sample_id": dataset_expression.index[index],
+                 "x": dataset_projection_df.iloc[index]["x"].item(),
+                 "y": dataset_projection_df.iloc[index]["y"].item()
+            }
+        )
+
+    _logger.info(len(dataset_projection_lst))
+
+    return dataset_projection_lst
 
 def main(args):
     global _connection_db
