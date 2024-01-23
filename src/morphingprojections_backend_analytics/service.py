@@ -313,7 +313,7 @@ def filter_index_attribute_view(items):
 
     return expression_lst
 
-@app.route('/tsne',  methods=['POST'])
+@app.route('/analytics/tsne',  methods=['POST'])
 def tsne():
     global _connection_db
     global _index_datamatrix
@@ -323,7 +323,7 @@ def tsne():
 
     # recover request data
     name = data['name']
-    description = data['description']
+    title = data['title']
     samples = data['samples']
     attributes = data['attributes']
 
@@ -419,7 +419,7 @@ def tsne():
 
     return dataset_projection_lst
 
-@app.route('/histogram',  methods=['POST'])
+@app.route('/analytics/histogram',  methods=['POST'])
 def histogram():
     response = []
     data = request.get_json() 
@@ -486,7 +486,6 @@ def histogram():
         for expression in expression_lst:
             for bin in range(0, bins):
                 if (expression["value"] < min_expression["value"] + interval * bin):
-                    #expression["bin"] = bin - 1
                     expression["bin"] = min_expression["value"] + bin * interval                    
                     break
 
