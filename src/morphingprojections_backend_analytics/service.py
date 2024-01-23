@@ -508,6 +508,14 @@ def histogram():
 
     return response
 
+def wsgi():
+    global _connection_db
+
+    # connect to elastic database
+    _connection_db = connect_database()
+
+    return app
+
 def main(args):
     global _connection_db
 
@@ -521,14 +529,6 @@ def main(args):
     _logger.info("Starting service ...")
     app.run(host='0.0.0.0', port=args.port, debug=True)
     _logger.info("Service ends here")
-
-    return app
-
-def wsgi():
-    global _connection_db
-
-    # connect to elastic database
-    _connection_db = connect_database()
 
     return app
 
