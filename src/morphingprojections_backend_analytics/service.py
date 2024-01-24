@@ -432,11 +432,11 @@ def histogram():
     if "annotation" in data:
         annotation = data["annotation"]
     filter_sample = None
-    if "filter_sample" in data:   
-        filter_sample = data["filter_sample"]
+    if "filterSampleAnnotation" in data:   
+        filter_sample = data["filterSampleAnnotation"]
     filter_attribute = None
-    if "filter_attribute" in data:           
-        filter_attribute = data["filter_attribute"]   
+    if "filterAttributeAnnotation" in data:           
+        filter_attribute = data["filterAttributeAnnotation"]   
     if "bins" in data:
         bins = data["bins"]
     groups = data['groups']
