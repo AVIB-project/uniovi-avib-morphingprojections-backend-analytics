@@ -114,8 +114,9 @@ def connect_database(**kwargs):
     _connection_db = Elasticsearch(
         ELASTIC_HOST,
         basic_auth=(ELASTIC_USER, ELASTIC_PASSWORD),
-        ca_certs=ELASTIC_CERTIFICATE,
-        verify_certs=True,
+        #ca_certs=ELASTIC_CERTIFICATE,
+        #verify_certs=True,
+        verify_certs=False,
         http_compress=True
     )
 
@@ -127,7 +128,7 @@ def connect_database(**kwargs):
 
     return _connection_db
 
-'''
+
 @app.route('/')
 def default_route():
     """Default route"""
@@ -140,7 +141,6 @@ def default_route():
     _logger.info("INFO LOG")
 
     return jsonify('hello world')
-'''
 
 def filter_index_datamatrix(view, items, filter_sample=None, filter_attribute=None):
     global _connection_db
