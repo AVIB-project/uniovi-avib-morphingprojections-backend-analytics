@@ -46,8 +46,8 @@ _logger = logging.getLogger(__name__)
 # Project default configuration
 PROJECT_ID = "genomic"
 INDEX_DATAMATRIX = "dataset_datamatrix_new"
-INDEX_DATASET_SAMPLE_VIEW = "dataset_encoding_default_new"
-INDEX_DATASET_ATTRIBUTE_VIEW = "dataset_attribute_view_encoding_default_new"
+INDEX_DATASET_SAMPLE_VIEW = "dataset_encoding_default"
+INDEX_DATASET_ATTRIBUTE_VIEW = "dataset_attribute_view_encoding_default"
 INDEX_SCROLL_MAX_TIME = '10s'
 INDEX_MATCH_SIZE = 9000
 
