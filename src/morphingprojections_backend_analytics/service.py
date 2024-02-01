@@ -24,18 +24,22 @@ import os
 import argparse
 import logging
 import sys
+
+from operator import itemgetter
 from operator import attrgetter
+from itertools import groupby
 
 import numpy as np
 import pandas as pd
 
 from flask import Flask, jsonify, request
-#from flask.ext.cors import CORS
 
 from elasticsearch import Elasticsearch, ConnectionError, RequestError, NotFoundError, helpers
 
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import MinMaxScaler
+
+from sklearn.linear_model import LogisticRegression
 
 __author__ = "Miguel Salinas Gancedo"
 __copyright__ = "Miguel Salinas Gancedo"
@@ -45,11 +49,12 @@ _logger = logging.getLogger(__name__)
 
 # Project default configuration
 PROJECT_ID = "genomic"
-INDEX_DATAMATRIX = "dataset_datamatrix_new"
+INDEX_DATAMATRIX = "dataset_datamatrix"
+#INDEX_DATAMATRIX = "dataset_datamatrix_new"
 INDEX_DATASET_SAMPLE_VIEW = "dataset_encoding_default"
 INDEX_DATASET_ATTRIBUTE_VIEW = "dataset_attribute_view_encoding_default"
 INDEX_SCROLL_MAX_TIME = '10s'
-INDEX_MATCH_SIZE = 9000
+INDEX_MATCH_SIZE = 10000
 
 # Database default configuration
 ELASTIC_HOST = "https://avib-elastic:9200"
@@ -60,7 +65,6 @@ ELASTIC_CERTIFICATE = os.path.dirname(os.path.realpath(__file__)) + "/certificat
 #ELASTIC_CERTIFICATE = os.path.dirname(os.path.realpath(__file__)) + "/certificates/ca-elastic-avib.crt"
 
 app = Flask(__name__)
-#CORS(app)
 
 # private module attributes
 _index_datamatrix = PROJECT_ID + "_" + INDEX_DATAMATRIX
@@ -128,7 +132,6 @@ def connect_database(**kwargs):
 
     return _connection_db
 
-
 @app.route('/')
 def default_route():
     """Default route"""
@@ -142,11 +145,19 @@ def default_route():
 
     return jsonify('hello world')
 
-def filter_index_datamatrix(view, items, filter_sample=None, filter_attribute=None):
+def filter_index_datamatrix(view, items, filter_samples=None, filter_attributes=None):
     global _connection_db
     global _index_datamatrix
 
-    response = []
+    # convert the sample and attribute annotation to collection to be general request
+    if filter_samples is not None and type(filter_samples) != list:
+        filter_samples = [filter_samples]
+
+    if filter_attributes is not None and type(filter_attributes) != list:
+        filter_attributes = [filter_attributes]
+
+    doc_total = 0
+    response = []    
 
     body = {
             "size": INDEX_MATCH_SIZE,
@@ -154,20 +165,26 @@ def filter_index_datamatrix(view, items, filter_sample=None, filter_attribute=No
                 "bool": {
                     "must": []
                 }
-            }
+            },
+            "fields": [
+                "sample_id",
+                "attribute",
+                "value",
+            ]
         }
 
     if view == "sample_view":
         body["query"]["bool"]["must"].append({"terms": {"sample_id": items }})
+        #body["query"]["bool"]["must"].append({"term": {"data_type": "mirna_expression" }})
 
-        if (filter_attribute is not None):
-            body["query"]["bool"]["must"].append({"term": {"attribute": filter_attribute }})
+        if (filter_attributes is not None):
+            body["query"]["bool"]["must"].append({"terms": {"attribute": filter_attributes }})
 
     if view == "attribute_view":
         body["query"]["bool"]["must"].append({"terms": {"attribute": items }})
 
-        if (filter_attribute is not None):
-            body["query"]["bool"]["must"].append({"term": {"sample_id": filter_sample }})
+        if (filter_samples is not None):
+            body["query"]["bool"]["must"].append({"terms": {"sample_id": filter_samples }})
 
     resp = _connection_db.search(
         index=_index_datamatrix, 
@@ -181,16 +198,21 @@ def filter_index_datamatrix(view, items, filter_sample=None, filter_attribute=No
     expression_lst = []
 
     # iterate over the document hits for each 'scroll'
-    while len(resp['hits']['hits']):        
+    while len(resp['hits']['hits']):
         doc_count = 0
+        
         for doc in resp['hits']['hits']:
             expression_lst.append(doc['_source'])
 
             doc_count += 1            
 
-            _logger.info("DOC COUNT: %s", doc_count)
+            #_logger.info("DOC COUNT: %s", doc_count)
 
-        _logger.info("TOTAL DOC COUNT: %s", doc_count)
+        #_logger.info("TOTAL DOC COUNT: %s", doc_count)
+
+        doc_total = doc_total + doc_count
+
+        #_logger.info("TOTAL DOC: %s", doc_total)
 
         # make a request using the Scroll API
         resp = _connection_db.scroll(
@@ -324,9 +346,13 @@ def tsne():
     # recover request data
     name = data['name']
     title = data['title']
-    samples = data['samples']
     attributes = data['attributes']
 
+    samples = None
+    if "samples" in data:
+        samples = data["samples"]
+
+    # create database filter    
     _logger.info("Create database body to recover samples from elasticsearch for %s filter", name)
 
     body = {
@@ -344,6 +370,7 @@ def tsne():
     if len(attributes) > 0:
         body["query"]["bool"]["must"].append({"terms": {"attribute": attributes }})
 
+    # execute database filter  
     _logger.info("Execute filter from elasticsearch in bulk requests")
 
     resp = _connection_db.search(
@@ -351,7 +378,6 @@ def tsne():
         body = body,
         scroll = INDEX_SCROLL_MAX_TIME)
 
-    # keep track of pass scroll _id
     old_scroll_id = resp['_scroll_id']
 
     # use a 'while' iterator to loop over document 'hits'
@@ -428,19 +454,21 @@ def histogram():
     name = data["name"]
     title = data["title"] 
     view = data["view"]
-    annotation = None
-    if "annotation" in data:
-        annotation = data["annotation"]
-    filter_sample = None
-    if "filterSampleAnnotation" in data:   
-        filter_sample = data["filterSampleAnnotation"]
-    filter_attribute = None
-    if "filterAttributeAnnotation" in data:           
-        filter_attribute = data["filterAttributeAnnotation"]   
-    if "bins" in data:
-        bins = data["bins"]
     groups = data['groups']
 
+    sample_annotation = None
+    if "filterSampleAnnotation" in data:   
+        sample_annotation = data["filterSampleAnnotation"]
+
+    attribute_annotation = None
+    if "filterAttributeAnnotation" in data:           
+        attribute_annotation = data["filterAttributeAnnotation"]  
+
+    bins = None        
+    if "bins" in data:
+        bins = data["bins"]
+
+    # aggregate all items grouped
     items = []
     for group in groups:
         items = items + group["values"]
@@ -450,18 +478,18 @@ def histogram():
 
     expression_lst = None
     if view == "sample_view":
-        if filter_attribute is not None:
-            expression_lst = filter_index_datamatrix(view, items, filter_sample, filter_attribute)
+        if attribute_annotation is None:
+            expression_lst = filter_index_sample_view(items)         
         else: 
-            expression_lst = filter_index_sample_view(items)
+            expression_lst = filter_index_datamatrix(view, items, sample_annotation, attribute_annotation)
 
     if view == "attribute_view":
-        if filter_sample is not None:
-            expression_lst = filter_index_datamatrix(view, items, filter_sample, filter_attribute)
-        else: 
+        if sample_annotation is None:
             expression_lst = filter_index_attribute_view(items)
-
-    # add group/color to all expressions list
+        else: 
+            expression_lst = filter_index_datamatrix(view, items, sample_annotation, attribute_annotation)
+            
+    # group expressions
     for expression in expression_lst:
         for group in groups:
             for value in group["values"]:
@@ -471,26 +499,28 @@ def histogram():
 
                     break
 
-    # group expression list by annotation
+    # calculate histogram from expressions
     _logger.info("Group filter items from data view %s for %s histogram", view, name)
 
-    if annotation is not None:
+    if sample_annotation is not None:
         expression_df = pd.DataFrame(expression_lst)
 
-        expression_grouped_df = expression_df.groupby([annotation, "group", "color"])[annotation].count()
+        expression_grouped_df = expression_df.groupby([sample_annotation, "group", "color"])[sample_annotation].count()
     else:
         max_expression = max(expression_lst, key=lambda exp: exp["value"])
         min_expression = min(expression_lst, key=lambda exp: exp["value"])        
         interval = (max_expression["value"] - min_expression["value"]) / bins
 
         for expression in expression_lst:
-            for bin in range(0, bins):
+            for bin in range(len(expression_lst)):
                 if (expression["value"] < min_expression["value"] + interval * bin):
-                    expression["bin"] = min_expression["value"] + bin * interval                    
+                    expression["bin"] = min_expression["value"] + bin * interval
+
                     break
 
         expression_df = pd.DataFrame(expression_lst)
-        
+        expression_df = expression_df.round(3)
+
         expression_grouped_df = expression_df.groupby(["bin", "group", "color"])["bin"].count()
 
     # parse respose to json list
@@ -504,6 +534,96 @@ def histogram():
 
     # order group respose by annotation
     response.sort(key=lambda item: item["annotation"])    
+
+    return response
+
+@app.route('/analytics/logistic_regression',  methods=['POST'])
+def logistic_regression():
+    response = []
+    data = request.get_json() 
+
+    # recover request data
+    name = data["name"]
+    title = data["title"] 
+    view = data["view"]
+    groups = data['groups']
+
+    sample_annotation = None
+    if "filterSampleAnnotation" in data:   
+        sample_annotation = data["filterSampleAnnotation"]
+
+    attribute_annotation = None
+    if "filterAttributeAnnotation" in data:           
+        attribute_annotation = data["filterAttributeAnnotation"] 
+
+    # aggregate all items grouped    
+    items = []
+    for index, group in  enumerate(groups):
+        items = items + group["values"]
+
+    sample_group_lst = []
+    for index_group, group in enumerate(groups):
+        for sample_id in group["values"]:
+            sample_group_lst.append({'sample_id': sample_id, 'group_id': index_group})        
+
+    # get expression list from filters only by miRNA attributes
+    attributes = data['attributes']
+
+    attribute_annotations = []
+    for attribute in attributes:
+        if "MIMAT" in attribute["key"]:
+            attribute_annotations.append(attribute["key"])
+
+    # get expressions from db
+    _logger.info("Get expressions from datamatrix for view %s and %s to execute logistic regression", view, name)
+
+    expression_lst = filter_index_datamatrix(view, items, sample_annotation, attribute_annotations)
+
+    # parse expression collection dataframe
+    expressions = pd.json_normalize(expression_lst)
+
+    expressions = expressions.pivot(index='sample_id', columns='attribute', values='value')
+    expressions = expressions.reset_index()
+
+    # parse group collection to dataframe
+    sample_groups = pd.json_normalize(sample_group_lst)
+
+    # merge expression with group dataframes
+    expressions = expressions.merge(sample_groups, how='inner', on='sample_id')
+    expressions = expressions.sort_values('group_id', ascending=True,)
+
+    # get logistic regression subdataframes to be trained
+    X = expressions.iloc[:,1:-1]
+    y = expressions.loc[:,"group_id"]
+
+    LR = LogisticRegression(random_state=0, solver='liblinear', multi_class='ovr').fit(X, y)
+
+    # get logistic regression coeficients (normal vector hyperplane)
+    d = LR.coef_
+    
+    # normalize logistic regression results
+    d = np.abs(d) # set absolute values
+    d = d/np.max(np.max(d)) # Normalize dataframe
+    d = d[0]
+    
+    response = []
+    for index_d, regression in enumerate(d):
+        sub_expression = expressions[[expressions.columns[index_d + 1], "group_id"]]
+        mean_expressions = sub_expression.groupby(by=["group_id"]).mean()
+        standard_deviation_expressions = sub_expression.groupby(by=["group_id"]).std()
+        
+        analytics_a = str(round(mean_expressions.values[0][0], 2)) + "±" + str(round(standard_deviation_expressions.values[0][0], 2))
+        analytics_b = str(round(mean_expressions.values[1][0], 2)) + "±" + str(round(standard_deviation_expressions.values[1][0], 2))
+
+        response.append(
+            {
+                "attribute": expressions.columns[index_d + 1], 
+                "analytics_a": analytics_a,
+                "analytics_b": analytics_b,
+                "value": regression
+            }) 
+
+    response.sort(key=lambda x: x["value"], reverse=True)
 
     return response
 
