@@ -49,8 +49,8 @@ _logger = logging.getLogger(__name__)
 
 # Project default configuration
 PROJECT_ID = "genomic"
-INDEX_DATAMATRIX = "dataset_datamatrix"
-#INDEX_DATAMATRIX = "dataset_datamatrix_new"
+#INDEX_DATAMATRIX = "dataset_datamatrix"
+INDEX_DATAMATRIX = "dataset_datamatrix_new"
 INDEX_DATASET_SAMPLE_VIEW = "dataset_encoding_default"
 INDEX_DATASET_ATTRIBUTE_VIEW = "dataset_attribute_view_encoding_default"
 INDEX_SCROLL_MAX_TIME = '10s'
@@ -447,7 +447,7 @@ def tsne():
 
 @app.route('/analytics/histogram',  methods=['POST'])
 def histogram():
-    response = []
+    histBins = []
     data = request.get_json() 
 
     # recover request data
@@ -524,18 +524,31 @@ def histogram():
         expression_grouped_df = expression_df.groupby(["bin", "group", "color"])["bin"].count()
 
     # parse respose to json list
-    for annotation in expression_grouped_df.index:
-        response.append({
+    for annotation in expression_grouped_df.index:            
+        histBins.append({
             "annotation": annotation[0],
             "group": annotation[1], 
             "color": annotation[2], 
             "value": int(expression_grouped_df.loc[annotation])
         })
 
-    # order group respose by annotation
-    response.sort(key=lambda item: item["annotation"])    
+   # parse respose to json list
+    for annotation in expression_grouped_df.index:
+        for group in groups:
+            result = next((histBin for histBin in histBins if histBin["group"] == group["name"] and histBin["annotation"] == annotation[0]), None)
+            
+            if result is None:
+                histBins.append({
+                    "annotation": annotation[0],
+                    "group": group["name"], 
+                    "color": group["color"], 
+                    "value": 0
+                })            
 
-    return response
+    # order group respose by annotation
+    histBins.sort(key=lambda item: item["annotation"])    
+
+    return histBins
 
 @app.route('/analytics/logistic_regression',  methods=['POST'])
 def logistic_regression():
