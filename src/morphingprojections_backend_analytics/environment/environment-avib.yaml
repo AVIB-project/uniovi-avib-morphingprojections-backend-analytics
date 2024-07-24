@@ -1,12 +1,5 @@
-mongodb:
-  host: avib-mongodb.default.svc.cluster.local
-  port: 27017
-  authentication-database: admin
-  database: configuration
-  username: root
-  password: password
-
 minio:
+  scheme: https
   host: uniovi-hl.default.svc.cluster.local
   port: 9000
   access_key: BLBZSkLGtFD63XmP

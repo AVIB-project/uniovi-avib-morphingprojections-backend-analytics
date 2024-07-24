@@ -10,6 +10,8 @@ RUN pip3 install -r requirements.txt
 COPY ./src /app/src
 COPY ./gunicorn_config.py /app
 
+ENV ARG_PYTHON_PROFILES_ACTIVE=avib
+
 WORKDIR /app
 
 EXPOSE 5000

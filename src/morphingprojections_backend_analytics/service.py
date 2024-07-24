@@ -1,9 +1,13 @@
 import os
 import sys
 import time
+import ast
 import argparse
 import logging
 from io import StringIO
+from io import BytesIO
+import json
+import shelve
 
 from pyaml_env import parse_config
 
@@ -18,6 +22,9 @@ from flask import Flask, jsonify, request
 
 import boto3
 
+from minio import Minio
+from minio.select import (ParquetInputSerialization, CSVInputSerialization, CSVOutputSerialization, SelectRequest)
+
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
 from sklearn.linear_model import LogisticRegression
@@ -25,6 +32,8 @@ from sklearn.linear_model import LogisticRegression
 __author__ = "Miguel Salinas Gancedo"
 __copyright__ = "Miguel Salinas Gancedo"
 __license__ = "MIT"
+
+CACHE_FOLDER = "./src/morphingprojections_backend_analytics/.cache"
 
 _logger = logging.getLogger(__name__)
 
@@ -36,7 +45,7 @@ else:
 
 app = Flask(__name__)
 
-_connection_minio = None
+_client_minio = None
 
 def parse_args(args):
     """Parse command line parameters
@@ -80,104 +89,221 @@ def setup_logging(loglevel):
 
 def connect_object_storage(config):
     return boto3.client('s3',
-        endpoint_url="https://" + str(config["host"]) + ":" + str(config["port"]),
+        endpoint_url=str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]),
         aws_access_key_id=config["access_key"],
         aws_secret_access_key=config["secret_key"],
         verify=False,
-        region_name='us-east-1')
+        region_name='us-east-1')    
 
-def filter_datamatrix(bucket_datamatrix, file_datamatrix, view, sample_annotation, attribute_annotation, items):
-    global _connection_minio
-
-    #get headers
-    headers_lst = _connection_minio.select_object_content(
-        Bucket=bucket_datamatrix,
-        Key=file_datamatrix,
-        ExpressionType='SQL',
-        Expression="SELECT * FROM s3object s LIMIT 1",
-        InputSerialization = {'CSV': {"FileHeaderInfo": "NONE"}, 'CompressionType': 'NONE'},
-        OutputSerialization = {'CSV': {}},
+    '''
+    return Minio(
+        str(config["host"]) + ":" + str(config["port"]),
+        access_key=config["access_key"],
+        secret_key=config["secret_key"],
+        secure=False
     )
+    '''       
 
-    headers = None
-    for event in headers_lst['Payload']:
-        if 'Records' in event:
-            records = event['Records']['Payload'].decode('utf-8')  
+def filter_object_storage(bucket, key, expression, fileHeaderInfo="USE", compressionType="NONE", fileFormat="CSV"):
+    start = time.time()
 
-            df =  pd.read_csv(StringIO(records), header=None)
-            
-            if headers is None:
-                headers = df
-            else:            
-                headers = pd.concat([headers, df])
-
-        elif 'End' in event:
-            print("End Event")
-        elif 'Stats' in event:
-            statsDetails = event['Stats']['Details']
-            print("Stats details bytesScanned: ")
-            print(statsDetails['BytesScanned'])
-            print("Stats details bytesProcessed: ")
-            print(statsDetails['BytesProcessed'])
-
-    print(headers.head())    
-
-    # get expressions
-    if sample_annotation is not None:
-        samples = ",".join(["'" + str(item) + "'" for item in items])
-        samples = "(" + samples + ")"
-
-        expression_lst = _connection_minio.select_object_content(
-            Bucket=bucket_datamatrix,
-            Key=file_datamatrix,
+    if fileFormat == "CSV":
+        result = _client_minio.select_object_content(
+            Bucket=bucket,
+            Key=key,
             ExpressionType='SQL',
-            Expression="SELECT * FROM s3object s where s.\"sample_id\" IN " + samples,
-            InputSerialization = {'CSV': {"FileHeaderInfo": "USE"}, 'CompressionType': 'NONE'},
-            OutputSerialization = {'CSV': {}},
+            Expression=expression,            
+            InputSerialization = {
+                'CSV': {"FileHeaderInfo": fileHeaderInfo}, 'CompressionType': compressionType},
+            OutputSerialization = {
+                'CSV': {}
+            },
+        )   
+
+        '''
+        result = _client_minio.select_object_content(
+            bucket,
+            key,
+            SelectRequest(
+                expression,
+                CSVInputSerialization(file_header_info=fileHeaderInfo),
+                CSVOutputSerialization()
+            )   
+        )    
+        '''           
+    elif fileFormat == "Parquet":
+        result = _client_minio.select_object_content(
+            Bucket=bucket,
+            Key=key,
+            ExpressionType='SQL',
+            Expression=expression,            
+            InputSerialization = {
+                'Parquet': {}
+            },
+            OutputSerialization = {
+                'CSV': {}
+            },
         )
+
+        '''
+        result = _client_minio.select_object_content(
+            bucket,
+            key,
+            SelectRequest(
+                expression,
+                ParquetInputSerialization(),
+                CSVOutputSerialization()
+            )   
+        )  
+        ''' 
+
+    '''
+    records = ""
+    for data in result.stream():
+       records += data.decode()
+    '''
+    
+    # concatenate final string with all rows selected
+    records = ""
+    #records = []
+    for event in result['Payload']:
+        if 'Records' in event:
+            events = event['Records']['Payload'].decode('UTF-8')            
+            #events =  event['Records']['Payload'].decode('ISO-8859-1')
+            records += events            
+        elif 'Stats' in event:
+            stats = event['Stats']['Details']
+        elif 'Cont' in event:
+            cont = event['Cont']
+
+    if fileHeaderInfo == "USE":
+        # parse string concatenated to dataframe for rows selected
+        records_df = pd.read_csv(StringIO(records), header=None)
+    else:
+        # parse string concatenated to dataframe for header selected
+        records_df = pd.read_csv(StringIO(records))  
+
+    # timestamp track
+    end = time.time()
+    _logger.info(end - start)
+
+    return records_df
+
+def filter_datamatrix(bucket, key, view, items):
+    # get datamatrix dataframe header
+    #headers_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object LIMIT 1", fileHeaderInfo="NONE")    
+    headers_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object LIMIT 1", fileHeaderInfo="NONE", fileFormat="Parquet")    
+
+    # get datamatrix expressions dataframe filtered by items (sample view (primal) or attribute view (dual))
+    if view == "sample_view":
+        samples = "(" + ",".join(["'" + str(item) + "'" for item in items]) + ")"
+
+        expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object WHERE sample_id IN " + samples)
+        #expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object WHERE sample_id IN " + samples, fileFormat="Parquet")
+
+        # add datamatrix header to expressions dataframe
+        expression_df.columns = headers_df.columns.values        
     else:
         attributes = ",".join(["'" + str(item) + "'" for item in items])
 
-        expression_lst = _connection_minio.select_object_content(
-            Bucket=bucket_datamatrix,
-            Key=file_datamatrix,
-            ExpressionType='SQL',
-            Expression="SELECT " + attributes + " FROM s3object s",
-            InputSerialization = {'CSV': {"FileHeaderInfo": "USE"}, 'CompressionType': 'NONE'},
-            OutputSerialization = {'CSV': {}},
-        )              
+        expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT " + attributes + " FROM s3object")
+        #expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT " + attributes + " FROM s3object", fileFormat="Parquet")
 
-    start = time.time()
+        # add datamatrix headers to expressions dataframe
+        expression_df.columns = headers_df.columns.values
 
-    expressions = None
-    for event in expression_lst['Payload']:
-        if 'Records' in event:
-            records = event['Records']['Payload'].decode('utf-8')  
+        # set transposed dataframe
+        expression_df = expression_df.T
 
-            df =  pd.read_csv(StringIO(records), header=None)
-            
-            if expressions is None:
-                expressions = df
-            else:            
-                expressions = pd.concat([expressions, df])
+    return expression_df
 
-        elif 'End' in event:
-            print("End Event")
-        elif 'Stats' in event:
-            statsDetails = event['Stats']['Details']
-            print("Stats details bytesScanned: ")
-            print(statsDetails['BytesScanned'])
-            print("Stats details bytesProcessed: ")
-            print(statsDetails['BytesProcessed'])
+def filter_cache_datamatrix(bucket, key, view, items):
+    # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
+    keys = key.split('/')
+    file_name = keys[2]
 
-    end = time.time()
-    print(end - start)
+    # get file last modify metadata to create a unique file key to be cached
+    response = _client_minio.head_object(Bucket=bucket, Key=key)
+    datetime_value = response["LastModified"]
+    file_key = file_name + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
 
-    expressions.columns = headers.iloc[0].values
+     # create a cache db per organization
+    cache_db = "cache_" + bucket + ".db"
 
-    print(expressions.head())
+    # Check if the file key is already in the cache
+    with shelve.open(CACHE_FOLDER + "/" + cache_db) as cache:        
+        if file_key not in cache:
+            # download file from minio and cache locally
+            file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
+            file_data = file_stream['Body'].read() 
 
-    return expressions
+            cache[file_key] = file_data
+
+            _logger.info("Reading from file " + file_key)
+        else:
+            # If in the cache, retrieve the content from the cache
+            _logger.info("Reading from cache " + file_key)
+ 
+        # parse parquet cache file to dataframe
+        df_datamatrix = pd.read_parquet(BytesIO(cache[file_key]))
+
+        # Filter datamatrix dataframe filtered by items (sample view (primal) or attribute view (dual))
+        if view == "sample_view":
+            # filter datamatrix dataframe rows by sample_id
+            df_datamatrix = df_datamatrix[df_datamatrix["sample_id"].isin(items)]
+        else:
+            # filter datamatrix dataframe columns by attribute_id
+            df_datamatrix = df_datamatrix[items]
+
+            # transposed datamatrix dataframe
+            df_datamatrix = df_datamatrix.T
+
+        # Return the content either from the cache or newly read file
+        return df_datamatrix
+
+def filter_annotation(bucket, file_annotation):
+    # get annotation dataframe headers
+    headers_df = filter_object_storage(bucket=bucket, key=file_annotation, expression="SELECT * FROM s3object LIMIT 1", fileHeaderInfo="NONE")
+
+    # get annotations dataframe
+    annotation_df = filter_object_storage(bucket, file_annotation, "SELECT * FROM s3object s")
+
+    # add resource headers to filtered expressions
+    annotation_df.columns = headers_df.columns.values
+
+    return annotation_df
+
+def filter_cache_annotation(bucket, key):
+# get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
+    keys = key.split('/')
+    file_name = keys[2]
+
+    # get file last modify metadata to create a unique file key to be cached
+    response = _client_minio.head_object(Bucket=bucket, Key=key)
+    datetime_value = response["LastModified"]
+    file_key = file_name + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
+
+     # create a cache db per organization
+    cache_db = "cache_" + bucket + ".db"
+
+    # Check if the file key is already in the cache
+    with shelve.open(CACHE_FOLDER + "/" + cache_db) as cache:        
+        if file_key not in cache:
+            # download file from minio and cache locally
+            file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
+            file_data = file_stream['Body'].read() 
+
+            cache[file_key] = file_data
+
+            _logger.info("Reading from file " + file_key)
+        else:
+            # If in the cache, retrieve the content from the cache
+            _logger.info("Reading from cache " + file_key)
+ 
+        # parse parquet cache file to dataframe
+        df_annotation = pd.read_parquet(BytesIO(cache[file_key]))
+
+        return df_annotation
 
 @app.route('/')
 def health():
@@ -185,230 +311,173 @@ def health():
 
     return jsonify('I am Ok')
 
-@app.route('/analytics/tsne',  methods=['POST'])
+@app.route('/analytics/tsne', methods=['POST'])
 def tsne():
+    start = time.time()
+
     response = []
     data = request.get_json() 
 
     # recover request data
     name = data['name']
     title = data['title']
-    attributes = data['attributes']
 
     samples = None
     if "samples" in data:
         samples = data["samples"]
 
-    # create database filter    
-    _logger.info("Create database body to recover samples from elasticsearch for %s filter", name)
+    attributes = None
+    if "attributes" in data:
+        attributes = data['attributes']
+
+    # TODO
+
+    # timestamp track
+    end = time.time()
+    _logger.info("TSNE processing time: " + str(end - start))
 
     return response
 
-@app.route('/analytics/histogram',  methods=['POST'])
+@app.route('/analytics/histogram', methods=['POST'])
 def histogram():
+    start = time.time()
+
     hist_bins = []
 
-    # recover request data
+    # recover request json data
     data = request.get_json() 
 
-    # nesource metadata to be filter
+    # get resource files
     bucket_datamatrix = data['bucketDataMatrix']
     file_datamatrix = data['fileDataMatrix']
+    if "bucketSampleAnnotation" in data:  
+        bucket_sample_annotation = data['bucketSampleAnnotation']
+    if "fileSampleAnnotation" in data:  
+        file_sample_annotation = data['fileSampleAnnotation']
+    if "bucketAttributeAnnotation" in data:          
+        bucket_attribute_annotation = data['bucketAttributeAnnotation']
+    if "fileAttributeAnnotation" in data:                  
+        file_attribute_annotation = data['fileAttributeAnnotation']
 
-    # name and title chart
+    # get name and chart title 
     name = data["name"]
     title = data["title"]             
 
-    # view type selected: sample or attribute view and filter selected
+    # get view type: sample_view (primal), attribute_view (dual)
     view = data["view"]
-    sample_annotation = None
-    if "filterSampleAnnotation" in data:   
-        sample_annotation = data["filterSampleAnnotation"]
 
-    attribute_annotation = None
-    if "filterAttributeAnnotation" in data:           
-        attribute_annotation = data["filterAttributeAnnotation"]  
+    # get annotation group selected: sample or attribute
+    if data["filterType"] == 'filter_sample':
+        annotation = data["filterSampleAnnotation"]
+        filter_by = "sample_annotation"
+    else:        
+        annotation = data["filterAttributeAnnotation"]  
+        filter_by = "attribute_annotation"
 
-    # number of bins selected
+    # number of bins selected (5 by default)
     bins = None        
     if "bins" in data:
         bins = data["bins"]
 
-    # groups and items by grouped selected
+    # groups and items pear grouped selected
     groups = data['groups']
 
     items = []
     for group in groups:
         items = items + group["values"]
 
-    # get expression list from filters    
+    # get datamatrix dataframe from filters    
     _logger.info("Get filter items from data view %s for %s histogram", view, name)
 
-    expressions = filter_datamatrix(bucket_datamatrix, file_datamatrix, view, sample_annotation, attribute_annotation, items)
+    # get datamatrix dataframe from items selected from view=primal/dual
+    #datamatrix_df = filter_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
 
-    if view == "attribute_view":
-        _logger.info("Get filter items from attribute_view: TODO")
-            
-    # group expressions
-    for expression in expressions:
-        for group in groups:
-            for value in group["values"]:
-                if value == expression["sample_id"]:
-                    expression["group"] = group["name"]
-                    expression["color"] = group["color"]
-
-                    break
-
-    # calculate histogram from expressions
-    _logger.info("Group filter items from data view %s for %s histogram", view, name)
-
-    if sample_annotation is not None:
-        expression_df = pd.DataFrame(expression_lst)
-
-        expression_grouped_df = expression_df.groupby([sample_annotation, "group", "color"])[sample_annotation].count()
-    else:
-        max_expression = max(expression_lst, key=lambda exp: exp["value"])
-        min_expression = min(expression_lst, key=lambda exp: exp["value"])        
-        interval = (max_expression["value"] - min_expression["value"]) / bins
-
-        for expression in expression_lst:
-            for bin in range(len(expression_lst)):
-                if (expression["value"] < min_expression["value"] + interval * bin):
-                    expression["bin"] = min_expression["value"] + bin * interval
-
-                    break
-
-        expression_df = pd.DataFrame(expression_lst)
-        expression_df = expression_df.round(3)
-
-        expression_grouped_df = expression_df.groupby(["bin", "group", "color"])["bin"].count()
-
-    # parse respose to json list
-    for annotation in expression_grouped_df.index:            
-        hist_bins.append({
-            "annotation": annotation[0],
-            "group": annotation[1], 
-            "color": annotation[2], 
-            "value": int(expression_grouped_df.loc[annotation])
-        })
-
-   # parse respose to json list
-    for annotation in expression_grouped_df.index:
-        for group in groups:
-            result = next((hist_bin for hist_bin in hist_bins if hist_bin["group"] == group["name"] and hist_bin["annotation"] == annotation[0]), None)
-            
-            if result is None:
-                hist_bins.append({
-                    "annotation": annotation[0],
-                    "group": group["name"], 
-                    "color": group["color"], 
-                    "value": 0
-                })            
-
-    # order group respose by annotation
-    hist_bins.sort(key=lambda item: item["annotation"])    
-
-    return hist_bins
-
-@app.route('/analytics/logistic_regression',  methods=['POST'])
-def logistic_regression():
-    response = []
-    data = request.get_json() 
-
-    # recover request data
-    index_datamatrix = data['indexDataMatrix']
-    name = data["name"]
-    title = data["title"] 
-    view = data["view"]
-    groups = data['groups']
-
-    sample_annotation = None
-    if "filterSampleAnnotation" in data:   
-        sample_annotation = data["filterSampleAnnotation"]
-
-    attribute_annotation = None
-    if "filterAttributeAnnotation" in data:           
-        attribute_annotation = data["filterAttributeAnnotation"] 
-
-    # aggregate all items grouped    
-    items = []
-    for index, group in  enumerate(groups):
-        items = items + group["values"]
-
-    sample_group_lst = []
-    for index_group, group in enumerate(groups):
-        for sample_id in group["values"]:
-            sample_group_lst.append({'sample_id': sample_id, 'group_id': index_group})        
-
-    # get expression list from filters only by miRNA attributes
-    attributes = data['attributes']
-
-    attribute_annotations = []
-    for attribute in attributes:
-        if "MIMAT" in attribute["key"]:
-            attribute_annotations.append(attribute["key"])
-
-    # get expressions from db
-    _logger.info("Get expressions from datamatrix for view %s and %s to execute logistic regression", view, name)
-
-    expression_lst = filter_datamatrix(view, items, index_datamatrix, sample_annotation, attribute_annotations)
-
-    # parse expression collection dataframe
-    expressions = pd.json_normalize(expression_lst)
-
-    expressions = expressions.pivot(index='sample_id', columns='attribute_id', values='value')
-    expressions = expressions.reset_index()
-
-    # parse group collection to dataframe
-    sample_groups = pd.json_normalize(sample_group_lst)
-
-    # merge expression with group dataframes
-    expressions = expressions.merge(sample_groups, how='inner', on='sample_id')
-    expressions = expressions.sort_values('group_id', ascending=True,)
-
-    # get logistic regression subdataframes to be trained
-    X = expressions.iloc[:,1:-1]
-    y = expressions.loc[:,"group_id"]
-
-    LR = LogisticRegression(random_state=0, solver='liblinear', multi_class='ovr').fit(X, y)
-
-    # get logistic regression coeficients (normal vector hyperplane)
-    d = LR.coef_
-    
-    # normalize logistic regression results
-    d = np.abs(d) # set absolute values
-    d = d/np.max(np.max(d)) # Normalize dataframe
-    d = d[0]
-    
-    response = []
-    for index_d, regression in enumerate(d):
-        sub_expression = expressions[[expressions.columns[index_d + 1], "group_id"]]
-        mean_expressions = sub_expression.groupby(by=["group_id"]).mean()
-        standard_deviation_expressions = sub_expression.groupby(by=["group_id"]).std()
+    df_datamatrix = filter_cache_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
         
-        analytics_a = str(round(mean_expressions.values[0][0], 2)) + "±" + str(round(standard_deviation_expressions.values[0][0], 2))
-        analytics_b = str(round(mean_expressions.values[1][0], 2)) + "±" + str(round(standard_deviation_expressions.values[1][0], 2))
+    # create expression dataframe
+    if view == "sample_view": 
+        # get sample annotations dataframe (primal)
+        #df_sample_annotation = filter_annotation(bucket_sample_annotation, file_sample_annotation)
+        df_sample_annotation = filter_cache_annotation(bucket_sample_annotation, file_sample_annotation)
 
-        response.append(
-            {
-                "attribute_id": expressions.columns[index_d + 1], 
-                "analytics_a": analytics_a,
-                "analytics_b": analytics_b,
-                "value": regression
-            }) 
+        # get expression dataframe merging filtered datamatrix dataframe with annotation dataframe from primal view
+        df_expression = pd.merge(df_datamatrix, df_sample_annotation, on=["sample_id"])        
+    else:
+        # get attribute annotations dataframe (dual)
+        #df_attribute_annotation = filter_annotation(bucket_attribute_annotation, file_attribute_annotation)
+        df_attribute_annotation = filter_cache_annotation(bucket_attribute_annotation, file_attribute_annotation)
 
-    response.sort(key=lambda x: x["value"], reverse=True)
+        # get expression dataframe merging filtered datamatrix dataframe with attribute dataframe from dual view
+        df_expression = pd.merge(df_datamatrix, df_attribute_annotation, on=["attribute_id"])
+
+    # apply histogram analytics to expression dataframe
+    histogram = []
+    for group in groups:
+        # create filtered dataframe for each group items
+        items = np.array(group["values"]) 
+        group_df = pd.DataFrame(data = items, columns = ["sample_id"])
+
+        expression_grouped_df = pd.merge(df_expression, group_df, on=["sample_id"])
+        
+        if filter_by == "sample_annotation":
+            # histogram grouped by sample annotation
+            df_expression_hist = expression_grouped_df.groupby([annotation])[annotation].count()                        
+
+            for index in df_expression_hist.index:    
+                data = {}
+                data["annotation"] = index
+                data["group"] = group["name"]
+                data["color"] = group["color"]
+                data["value"] = int(df_expression_hist[index])
+
+                histogram.append(data)            
+        else:            
+            # histogram grouped by attribute annotation
+            expression_grouped_df["hist"]=pd.cut(expression_grouped_df[annotation], bins=bins)
+            df_expression_hist = expression_grouped_df.groupby(["hist"])["hist"].count() 
+
+            for index in df_expression_hist.index:    
+                data = {}
+                data["annotation"] = str(index.mid)
+                data["group"] = group["name"]
+                data["color"] = group["color"]
+                data["value"] = int(df_expression_hist[index])
+
+                histogram.append(data)            
+        
+    # order group respose by annotation
+    histogram.sort(key=lambda item: item["annotation"])    
+
+    # timestamp track
+    end = time.time()
+    _logger.info("Histogram processing time: " + str(end - start))
+
+    return histogram
+
+@app.route('/analytics/logistic_regression', methods=['POST'])
+def logistic_regression():
+    start = time.time()
+
+    response = []
+
+    # TODO
+    # timestamp track
+    end = time.time()
+    _logger.info("Logistic Regression processing time: " + str(end - start))
 
     return response
 
 def wsgi():
+    global _connection_minio
+    global _config
+
     # connect to elastic database
     _connection_minio = connect_object_storage(_config["minio"])
 
     return app
 
 def main(args):
-    global _connection_minio
+    global _client_minio
     global _config
 
     args, unknown = parse_args(args)
@@ -416,7 +485,7 @@ def main(args):
     setup_logging(args.loglevel)
     
     # connect to elastic database
-    _connection_minio = connect_object_storage(_config["minio"])
+    _client_minio = connect_object_storage(_config["minio"])
 
     _logger.info("Starting service ...")
     app.run(host='0.0.0.0', port=args.port, debug=True)
