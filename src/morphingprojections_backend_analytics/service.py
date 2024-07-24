@@ -1,19 +1,12 @@
 import os
 import sys
 import time
-import ast
 import argparse
 import logging
-from io import StringIO
-from io import BytesIO
-import json
 import shelve
+from io import BytesIO
 
 from pyaml_env import parse_config
-
-from operator import itemgetter
-from operator import attrgetter
-from itertools import groupby
 
 import numpy as np
 import pandas as pd
@@ -22,12 +15,9 @@ from flask import Flask, jsonify, request
 
 import boto3
 
-from minio import Minio
-from minio.select import (ParquetInputSerialization, CSVInputSerialization, CSVOutputSerialization, SelectRequest)
-
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.manifold import TSNE
-from sklearn.linear_model import LogisticRegression
 
 __author__ = "Miguel Salinas Gancedo"
 __copyright__ = "Miguel Salinas Gancedo"
@@ -93,129 +83,7 @@ def connect_object_storage(config):
         aws_access_key_id=config["access_key"],
         aws_secret_access_key=config["secret_key"],
         verify=False,
-        region_name='us-east-1')    
-
-    '''
-    return Minio(
-        str(config["host"]) + ":" + str(config["port"]),
-        access_key=config["access_key"],
-        secret_key=config["secret_key"],
-        secure=False
-    )
-    '''       
-
-def filter_object_storage(bucket, key, expression, fileHeaderInfo="USE", compressionType="NONE", fileFormat="CSV"):
-    start = time.time()
-
-    if fileFormat == "CSV":
-        result = _client_minio.select_object_content(
-            Bucket=bucket,
-            Key=key,
-            ExpressionType='SQL',
-            Expression=expression,            
-            InputSerialization = {
-                'CSV': {"FileHeaderInfo": fileHeaderInfo}, 'CompressionType': compressionType},
-            OutputSerialization = {
-                'CSV': {}
-            },
-        )   
-
-        '''
-        result = _client_minio.select_object_content(
-            bucket,
-            key,
-            SelectRequest(
-                expression,
-                CSVInputSerialization(file_header_info=fileHeaderInfo),
-                CSVOutputSerialization()
-            )   
-        )    
-        '''           
-    elif fileFormat == "Parquet":
-        result = _client_minio.select_object_content(
-            Bucket=bucket,
-            Key=key,
-            ExpressionType='SQL',
-            Expression=expression,            
-            InputSerialization = {
-                'Parquet': {}
-            },
-            OutputSerialization = {
-                'CSV': {}
-            },
-        )
-
-        '''
-        result = _client_minio.select_object_content(
-            bucket,
-            key,
-            SelectRequest(
-                expression,
-                ParquetInputSerialization(),
-                CSVOutputSerialization()
-            )   
-        )  
-        ''' 
-
-    '''
-    records = ""
-    for data in result.stream():
-       records += data.decode()
-    '''
-    
-    # concatenate final string with all rows selected
-    records = ""
-    #records = []
-    for event in result['Payload']:
-        if 'Records' in event:
-            events = event['Records']['Payload'].decode('UTF-8')            
-            #events =  event['Records']['Payload'].decode('ISO-8859-1')
-            records += events            
-        elif 'Stats' in event:
-            stats = event['Stats']['Details']
-        elif 'Cont' in event:
-            cont = event['Cont']
-
-    if fileHeaderInfo == "USE":
-        # parse string concatenated to dataframe for rows selected
-        records_df = pd.read_csv(StringIO(records), header=None)
-    else:
-        # parse string concatenated to dataframe for header selected
-        records_df = pd.read_csv(StringIO(records))  
-
-    # timestamp track
-    end = time.time()
-    _logger.info(end - start)
-
-    return records_df
-
-def filter_datamatrix(bucket, key, view, items):
-    # get datamatrix dataframe header
-    #headers_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object LIMIT 1", fileHeaderInfo="NONE")    
-    headers_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object LIMIT 1", fileHeaderInfo="NONE", fileFormat="Parquet")    
-
-    # get datamatrix expressions dataframe filtered by items (sample view (primal) or attribute view (dual))
-    if view == "sample_view":
-        samples = "(" + ",".join(["'" + str(item) + "'" for item in items]) + ")"
-
-        expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object WHERE sample_id IN " + samples)
-        #expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT * FROM s3object WHERE sample_id IN " + samples, fileFormat="Parquet")
-
-        # add datamatrix header to expressions dataframe
-        expression_df.columns = headers_df.columns.values        
-    else:
-        attributes = ",".join(["'" + str(item) + "'" for item in items])
-
-        expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT " + attributes + " FROM s3object")
-        #expression_df = filter_object_storage(bucket=bucket, key=key, expression="SELECT " + attributes + " FROM s3object", fileFormat="Parquet")
-
-        # add datamatrix headers to expressions dataframe
-        expression_df.columns = headers_df.columns.values
-
-        # set transposed dataframe
-        expression_df = expression_df.T
-
-    return expression_df
+        region_name='us-east-1')  
 
 def filter_cache_datamatrix(bucket, key, view, items):
     # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
@@ -261,20 +129,8 @@ def filter_cache_datamatrix(bucket, key, view, items):
         # Return the content either from the cache or newly read file
         return df_datamatrix
 
-def filter_annotation(bucket, file_annotation):
-    # get annotation dataframe headers
-    headers_df = filter_object_storage(bucket=bucket, key=file_annotation, expression="SELECT * FROM s3object LIMIT 1", fileHeaderInfo="NONE")
-
-    # get annotations dataframe
-    annotation_df = filter_object_storage(bucket, file_annotation, "SELECT * FROM s3object s")
-
-    # add resource headers to filtered expressions
-    annotation_df.columns = headers_df.columns.values
-
-    return annotation_df
-
 def filter_cache_annotation(bucket, key):
-# get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
+    # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
     keys = key.split('/')
     file_name = keys[2]
 
