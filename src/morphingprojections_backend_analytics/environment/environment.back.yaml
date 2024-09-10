@@ -1,6 +1,0 @@
-minio:
-  scheme: https
-  host: localhost
-  port: 9000
-  access_key: gl8rbGORHSpxmg1V
-  secret_key: 8WphDMckYqRb29s43SzA4trsV2GgaQRc
