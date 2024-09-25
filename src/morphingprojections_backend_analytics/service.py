@@ -88,18 +88,21 @@ def connect_object_storage(config):
 def filter_cache_datamatrix(bucket, key, view, items):
     # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
     keys = key.split('/')
+
+    project_id = keys[0]
+    case_id = keys[1]
     file_name = keys[2]
 
     # get file last modify metadata to create a unique file key to be cached
     response = _client_minio.head_object(Bucket=bucket, Key=key)
     datetime_value = response["LastModified"]
-    file_key = file_name + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
-
      # create a cache db per organization
-    cache_db = "cache_" + bucket + ".db"
+    #cache_db = "cache_" + bucket + ".db"
+    cache_file = "cache_" + bucket + "_" + project_id + "_" + case_id + "_" + file_name
+    file_key = cache_file + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
 
     # Check if the file key is already in the cache
-    with shelve.open(CACHE_FOLDER + "/" + cache_db) as cache:        
+    with shelve.open(CACHE_FOLDER + "/" + cache_file) as cache:        
         if file_key not in cache:
             # download file from minio and cache locally
             file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
@@ -113,7 +116,8 @@ def filter_cache_datamatrix(bucket, key, view, items):
             _logger.info("Reading from cache " + file_key)
  
         # parse parquet cache file to dataframe
-        df_datamatrix = pd.read_parquet(BytesIO(cache[file_key]))
+        #df_datamatrix = pd.read_parquet(BytesIO(cache[file_key]))
+        df_datamatrix = pd.read_csv(BytesIO(cache[file_key]))
 
         # Filter datamatrix dataframe filtered by items (sample view (primal) or attribute view (dual))
         if view == "sample_view":
@@ -132,6 +136,9 @@ def filter_cache_datamatrix(bucket, key, view, items):
 def filter_cache_annotation(bucket, key):
     # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
     keys = key.split('/')
+    
+    project_id = keys[0]
+    case_id = keys[1]
     file_name = keys[2]
 
     # get file last modify metadata to create a unique file key to be cached
@@ -140,10 +147,11 @@ def filter_cache_annotation(bucket, key):
     file_key = file_name + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
 
      # create a cache db per organization
-    cache_db = "cache_" + bucket + ".db"
+    #cache_db = "cache_" + bucket + ".db"
+    cache_file = "cache_" + bucket + "_" + project_id + "_" + case_id + "_" + file_name
 
     # Check if the file key is already in the cache
-    with shelve.open(CACHE_FOLDER + "/" + cache_db) as cache:        
+    with shelve.open(CACHE_FOLDER + "/" + cache_file) as cache:        
         if file_key not in cache:
             # download file from minio and cache locally
             file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
@@ -157,7 +165,8 @@ def filter_cache_annotation(bucket, key):
             _logger.info("Reading from cache " + file_key)
  
         # parse parquet cache file to dataframe
-        df_annotation = pd.read_parquet(BytesIO(cache[file_key]))
+        #df_annotation = pd.read_parquet(BytesIO(cache[file_key]))
+        df_annotation = pd.read_csv(BytesIO(cache[file_key]))
 
         return df_annotation
 
@@ -242,28 +251,31 @@ def histogram():
     for group in groups:
         items = items + group["values"]
 
-    # get datamatrix dataframe from filters    
-    _logger.info("Get filter items from data view %s for %s histogram", view, name)
-
     # get datamatrix dataframe from items selected from view=primal/dual
     #datamatrix_df = filter_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
 
+    _logger.info("Cache Datamatrix for view %s and %s histogram", view, name)
     df_datamatrix = filter_cache_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
         
-    # create expression dataframe
+    # create expression dataframe from cache datamatrix and annotations cache file
+    _logger.info("Prepare expression datamatrix for view %s and %s histogram", view, name)
     if view == "sample_view": 
         # get sample annotations dataframe (primal)
+        _logger.info("Cache Sample Annotations for view %s and %s histogram", view, name)
         #df_sample_annotation = filter_annotation(bucket_sample_annotation, file_sample_annotation)
         df_sample_annotation = filter_cache_annotation(bucket_sample_annotation, file_sample_annotation)
 
         # get expression dataframe merging filtered datamatrix dataframe with annotation dataframe from primal view
+        _logger.info("Merge Datamatrix with Sample Annotations for view %s and %s histogram", view, name)
         df_expression = pd.merge(df_datamatrix, df_sample_annotation, on=["sample_id"])        
     else:
         # get attribute annotations dataframe (dual)
+        _logger.info("Cache Attribute Annotations file for view %s and %s histogram", view, name)
         #df_attribute_annotation = filter_annotation(bucket_attribute_annotation, file_attribute_annotation)
         df_attribute_annotation = filter_cache_annotation(bucket_attribute_annotation, file_attribute_annotation)
 
         # get expression dataframe merging filtered datamatrix dataframe with attribute dataframe from dual view
+        _logger.info("Merge Datamatrix with Attribute Annotations for view %s and %s histogram", view, name)
         df_expression = pd.merge(df_datamatrix, df_attribute_annotation, on=["attribute_id"])
 
     # apply histogram analytics to expression dataframe

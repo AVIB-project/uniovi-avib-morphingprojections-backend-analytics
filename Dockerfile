@@ -11,6 +11,7 @@ COPY ./src /app/src
 COPY ./gunicorn_config.py /app
 
 ENV ARG_PYTHON_PROFILES_ACTIVE=avib
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
