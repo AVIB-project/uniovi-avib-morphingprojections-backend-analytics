@@ -207,8 +207,6 @@ def tsne():
 def histogram():
     start = time.time()
 
-    hist_bins = []
-
     # recover request json data
     data = request.get_json() 
 
@@ -252,30 +250,34 @@ def histogram():
         items = items + group["values"]
 
     # get datamatrix dataframe from items selected from view=primal/dual
-    #datamatrix_df = filter_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
-
     _logger.info("Cache Datamatrix for view %s and %s histogram", view, name)
+
+    #datamatrix_df = filter_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
     df_datamatrix = filter_cache_datamatrix(bucket_datamatrix, file_datamatrix, view, items)
         
     # create expression dataframe from cache datamatrix and annotations cache file
     _logger.info("Prepare expression datamatrix for view %s and %s histogram", view, name)
     if view == "sample_view": 
-        # get sample annotations dataframe (primal)
         _logger.info("Cache Sample Annotations for view %s and %s histogram", view, name)
+
+        # get sample annotations dataframe (primal)
         #df_sample_annotation = filter_annotation(bucket_sample_annotation, file_sample_annotation)
         df_sample_annotation = filter_cache_annotation(bucket_sample_annotation, file_sample_annotation)
 
-        # get expression dataframe merging filtered datamatrix dataframe with annotation dataframe from primal view
         _logger.info("Merge Datamatrix with Sample Annotations for view %s and %s histogram", view, name)
+
+        # get expression dataframe merging filtered datamatrix dataframe with annotation dataframe from primal view
         df_expression = pd.merge(df_datamatrix, df_sample_annotation, on=["sample_id"])        
     else:
-        # get attribute annotations dataframe (dual)
         _logger.info("Cache Attribute Annotations file for view %s and %s histogram", view, name)
+
+        # get attribute annotations dataframe (dual)
         #df_attribute_annotation = filter_annotation(bucket_attribute_annotation, file_attribute_annotation)
         df_attribute_annotation = filter_cache_annotation(bucket_attribute_annotation, file_attribute_annotation)
 
-        # get expression dataframe merging filtered datamatrix dataframe with attribute dataframe from dual view
         _logger.info("Merge Datamatrix with Attribute Annotations for view %s and %s histogram", view, name)
+
+        # get expression dataframe merging filtered datamatrix dataframe with attribute dataframe from dual view
         df_expression = pd.merge(df_datamatrix, df_attribute_annotation, on=["attribute_id"])
 
     # apply histogram analytics to expression dataframe
@@ -327,9 +329,91 @@ def logistic_regression():
     start = time.time()
 
     response = []
+    data = request.get_json() 
 
-    # TODO
-    # timestamp track
+    # recover request data
+    name = data["name"]
+    title = data["title"] 
+    view = data["view"]
+    groups = data['groups']
+
+    sample_annotation = None
+    if "filterSampleAnnotation" in data:   
+        sample_annotation = data["filterSampleAnnotation"]
+
+    attribute_annotation = None
+    if "filterAttributeAnnotation" in data:           
+        attribute_annotation = data["filterAttributeAnnotation"] 
+
+    # aggregate all items grouped    
+    items = []
+    for index, group in  enumerate(groups):
+        items = items + group["values"]
+
+    sample_group_lst = []
+    for index_group, group in enumerate(groups):
+        for sample_id in group["values"]:
+            sample_group_lst.append({'sample_id': sample_id, 'group_id': index_group})        
+
+    # get expression list from filters only by miRNA attributes
+    attributes = data['attributes']
+
+    attribute_annotations = []
+    for attribute in attributes:
+        if "MIMAT" in attribute["key"]:
+            attribute_annotations.append(attribute["key"])
+
+    # get expressions from db
+    _logger.info("Get expressions from datamatrix for view %s and %s to execute logistic regression", view, name)
+
+    expression_lst = filter_index_datamatrix(view, items, sample_annotation, attribute_annotations)
+
+    # parse expression collection dataframe
+    expressions = pd.json_normalize(expression_lst)
+
+    expressions = expressions.pivot(index='sample_id', columns='attribute', values='value')
+    expressions = expressions.reset_index()
+
+    # parse group collection to dataframe
+    sample_groups = pd.json_normalize(sample_group_lst)
+
+    # merge expression with group dataframes
+    expressions = expressions.merge(sample_groups, how='inner', on='sample_id')
+    expressions = expressions.sort_values('group_id', ascending=True,)
+
+    # get logistic regression subdataframes to be trained
+    X = expressions.iloc[:,1:-1]
+    y = expressions.loc[:,"group_id"]
+
+    LR = LogisticRegression(random_state=0, solver='liblinear', multi_class='ovr').fit(X, y)
+
+    # get logistic regression coeficients (normal vector hyperplane)
+    d = LR.coef_
+    
+    # normalize logistic regression results
+    d = np.abs(d) # set absolute values
+    d = d/np.max(np.max(d)) # Normalize dataframe
+    d = d[0]
+    
+    response = []
+    for index_d, regression in enumerate(d):
+        sub_expression = expressions[[expressions.columns[index_d + 1], "group_id"]]
+        mean_expressions = sub_expression.groupby(by=["group_id"]).mean()
+        standard_deviation_expressions = sub_expression.groupby(by=["group_id"]).std()
+        
+        analytics_a = str(round(mean_expressions.values[0][0], 2)) + "±" + str(round(standard_deviation_expressions.values[0][0], 2))
+        analytics_b = str(round(mean_expressions.values[1][0], 2)) + "±" + str(round(standard_deviation_expressions.values[1][0], 2))
+
+        response.append(
+            {
+                "attribute": expressions.columns[index_d + 1], 
+                "analytics_a": analytics_a,
+                "analytics_b": analytics_b,
+                "value": regression
+            }) 
+
+    response.sort(key=lambda x: x["value"], reverse=True)
+
     end = time.time()
     _logger.info("Logistic Regression processing time: " + str(end - start))
 
