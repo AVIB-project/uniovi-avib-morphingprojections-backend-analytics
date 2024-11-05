@@ -1,6 +1,6 @@
 minio:
   scheme: https
-  host: uniovi-hl.default.svc.cluster.local
+  host: uniovi-hl
   port: 9000
-  access_key: BLBZSkLGtFD63XmP
-  secret_key: vY8jARXmV7tsp7HSmtuBPjzBy8BWG57s 
+  access_key: RS6P1ApnSrDf9MaS
+  secret_key: weQJEUUEVfNZV1Zs0MnA0e9CT2d71jSK 

@@ -65,9 +65,40 @@ gunicorn --config gunicorn_config.py --log-level=debug 'src.morphingprojections_
 
 **STEP08**: Manage docker images and run
 
+build image for local environment:
+
 ```
-$ docker build -t uniovi-avib-morphingprojections-backend-analytics .
-$ docker run -p 5000:5000 uniovi-avib-morphingprojections-backend-analytics
+docker build -t uniovi-avib-morphingprojections-backend-analytics:1.0.0 .
+
+docker tag uniovi-avib-morphingprojections-backend-analytics:1.0.0 avibdocker.azurecr.io/uniovi-avib-morphingprojections-backend-analytics:1.0.0
+
+docker push uniovi-avib-morphingprojections-backend-analytics:1.0.0
+```
+
+build image for local minikube environment:
+
+```
+docker build --build-arg ARG_PYTHON_PROFILES_ACTIVE=minikube -t uniovi-avib-morphingprojections-backend-analytics:1.0.0 .
+
+docker tag uniovi-avib-morphingprojections-backend-analytics:1.0.0 avibdocker.azurecr.io/uniovi-avib-morphingprojections-backend-analytics:1.0.0
+
+docker push avibdocker.azurecr.io/uniovi-avib-morphingprojections-backend-analytics:1.0.0
+```
+
+build image for avib environment:
+
+```
+docker build --build-arg ARG_PYTHON_PROFILES_ACTIVE=avib -t uniovi-avib-morphingprojections-backend-analytics:1.0.0 .
+
+docker tag uniovi-avib-morphingprojections-backend-analytics:1.0.0 avibdocker.azurecr.io/uniovi-avib-morphingprojections-backend-analytics:1.0.0
+
+docker push avibdocker.azurecr.io/uniovi-avib-morphingprojections-backend-analytics:1.0.0
+```
+
+Execute flow locally for a case_id 65cdc989fa8c8fdbcefac01e:
+
+```
+docker run --rm uniovi-avib-morphingprojections-backend-analytics:1.0.0
 ```
 
 <!-- pyscaffold-notes -->

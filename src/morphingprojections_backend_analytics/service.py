@@ -420,11 +420,11 @@ def logistic_regression():
     return response
 
 def wsgi():
-    global _connection_minio
+    global _client_minio
     global _config
 
     # connect to elastic database
-    _connection_minio = connect_object_storage(_config["minio"])
+    _client_minio = connect_object_storage(_config["minio"])
 
     return app
 
