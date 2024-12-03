@@ -44,7 +44,6 @@ $ pip install pandas
 $ pip install scikit-learn
 $ pip install seaborn
 $ pip install flask
-$ pip install elasticsearch
 ```
 
 **STEP04**: generate the requirements with all python package dependencies
