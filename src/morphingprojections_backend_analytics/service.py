@@ -112,14 +112,14 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
     with shelve.open(CACHE_FOLDER + "/" + cache_db, flag='c', writeback=False) as cache:        
         if file_key not in cache:              
             # download file from minio and cache locally
-            #file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
-            #file_data = file_stream['Body'].read() 
+            file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
+            file_data = file_stream['Body'].read() 
 
             # parse parquet cache file to dataframe
             #df_datamatrix = pd.read_parquet(BytesIO(cache[file_key]))                
-            #df_datamatrix = pd.read_csv(BytesIO(file_data))                
+            df_datamatrix = pd.read_csv(BytesIO(file_data))                
 
-            df_datamatrix = dd.read_csv(
+            '''df_datamatrix = dd.read_csv(
                 "s3://" + bucket + "/" + key,
                 blocksize="100MB",
                 storage_options={
@@ -127,7 +127,7 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
                     "secret": config["secret_key"],
                     "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
                 }
-            )
+            )'''
 
             #cache[file_key] = file_data
             cache[file_key] = df_datamatrix
@@ -137,24 +137,16 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
             # If in the cache, retrieve the content from the cache
             _logger.info("Reading from cache " + file_key)
  
-        # parse parquet cache file to dataframe
-        #df_datamatrix = pd.read_parquet(BytesIO(cache[file_key]))
-        #df_datamatrix = pd.read_csv(BytesIO(cache[file_key]))
-
         # Filter datamatrix dataframe filtered by items (sample view (primal) or attribute view (dual))
         if view == "sample_view":
             # filter datamatrix dataframe rows by sample_id
-            #df_datamatrix = df_datamatrix[df_datamatrix["sample_id"].isin(items)]
             df_datamatrix = cache[file_key][cache[file_key]["sample_id"].isin(items)]            
         else:
             # filter datamatrix dataframe columns by attribute_id
-            #df_datamatrix = df_datamatrix[items]
             df_datamatrix = cache[file_key][items]            
 
             # transposed datamatrix dataframe
             df_datamatrix = df_datamatrix.T
-
-        #cache.close()
 
         # Return the content either from the cache or newly read file
         return df_datamatrix
@@ -181,10 +173,12 @@ def get_filter_cache_annotation(config, bucket, key):
         if file_key not in cache:
             try: 
                 # download file from minio and cache locally
-                #file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
-                #file_data = file_stream['Body'].read() 
+                file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
+                file_data = file_stream['Body'].read() 
 
-                df_annotation = dd.read_csv(
+                df_annotation = pd.read_csv(BytesIO(file_data)) 
+
+                '''df_annotation = dd.read_csv(
                     "s3://" + bucket + "/" + key,
                     blocksize="100MB",
                     storage_options={
@@ -192,7 +186,7 @@ def get_filter_cache_annotation(config, bucket, key):
                         "secret": config["secret_key"],
                         "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
                     }
-                )
+                )'''
 
                 cache[file_key] = df_annotation
 
@@ -204,13 +198,9 @@ def get_filter_cache_annotation(config, bucket, key):
             # If in the cache, retrieve the content from the cache
             _logger.info("Reading from cache " + file_key)
  
-        # parse parquet cache file to dataframe
-        #df_annotation = pd.read_parquet(BytesIO(cache[file_key]))
-        #df_annotation = pd.read_csv(BytesIO(cache[file_key]))
+        df_annotation = cache[file_key]
 
-        #cache.close()
-
-        return cache[file_key]
+        return df_annotation
 
 def get_filter_attributes(df_expressions):
     # return the columns (attributes) without the first one (sample_id)
@@ -268,35 +258,25 @@ def histogram():
     for group in groups:
         items = items + group["values"]
 
-    _logger.info("Get expressions from datamatrix from view %s and %s to execute histogram", view, name)
-
+    _logger.info("Get and cache Datamatrix from view %s and name %s", view, name)
     df_expression = get_filter_cache_datamatrix(_config["minio"], bucket_datamatrix, file_datamatrix, view, items)
         
-    # create expression dataframe from cache datamatrix and annotations cache file
-    _logger.info("Prepare expression datamatrix for view %s and %s histogram", view, name)
+    # create expression dataframe from cache datamatrix and annotations cache file    
     if view == "sample_view": 
-        _logger.info("Cache Sample Annotations for view %s and %s histogram", view, name)
-
         # get sample annotations dataframe (primal)
-        #df_sample_annotation = filter_annotation(bucket_sample_annotation, file_sample_annotation)
+        _logger.info("Get and cache Sample Annotations")
         df_sample_annotation = get_filter_cache_annotation(_config["minio"], bucket_sample_annotation, file_sample_annotation)
-
-        _logger.info("Merge Datamatrix with Sample Annotations for view %s and %s histogram", view, name)
-
+        
         # get expression dataframe merging filtered datamatrix dataframe with annotation dataframe from primal view
-        #df_expression = pd.merge(df_datamatrix, df_sample_annotation, on=["sample_id"])        
+        _logger.info("Merge Datamatrix with Sample Annotations")
         df_expression = df_expression.merge(df_sample_annotation, how='inner', on='sample_id')
     else:
-        _logger.info("Cache Attribute Annotations file for view %s and %s histogram", view, name)
-
         # get attribute annotations dataframe (dual)
-        #df_attribute_annotation = filter_annotation(bucket_attribute_annotation, file_attribute_annotation)
+        _logger.info("Get and cache Attribute Annotations")
         df_attribute_annotation = get_filter_cache_annotation(_config["minio"], bucket_attribute_annotation, file_attribute_annotation)
 
-        _logger.info("Merge Datamatrix with Attribute Annotations for view %s and %s histogram", view, name)
-
         # get expression dataframe merging filtered datamatrix dataframe with attribute dataframe from dual view
-        #df_expression = pd.merge(df_datamatrix, df_attribute_annotation, on=["attribute_id"])
+        _logger.info("Merge Datamatrix with Attribute Annotations")
         df_expression = df_expression.merge(df_attribute_annotation, how='inner', on='attribute_id')
 
     # apply histogram analytics to expression dataframe
@@ -304,11 +284,10 @@ def histogram():
     for group in groups:
         # create filtered dataframe for each group items
         items = np.array(group["values"]) 
-        #df_group = dd.DataFrame(data = items, columns = ["sample_id"])
-        df_group = dd.from_array(items, columns=['sample_id'])
+        df_group = pd.DataFrame(data = items, columns = ["sample_id"])
+        #df_group = dd.from_array(items, columns=['sample_id'])
 
         # add sample annotation metadata to groups
-        #df_expression_grouped = pd.merge(df_expression, df_group, on=["sample_id"])
         df_expression_grouped = df_expression.merge(df_group, on=["sample_id"])
         
         # create histogram
@@ -321,8 +300,8 @@ def histogram():
                 data["annotation"] = index
                 data["group"] = group["name"]
                 data["color"] = group["color"]
-                #data["value"] = int(df_expression_hist[index])
-                data["value"] = int(df_expression_hist[index].compute().values)
+                data["value"] = int(df_expression_hist[index])
+                #data["value"] = int(df_expression_hist[index].compute().values)
 
                 lst_histogram.append(data)            
         else:            
@@ -396,18 +375,15 @@ def logistic_regression():
             sample_group_lst.append({'sample_id': sample_id, 'group_id': index_group})        
 
     # get expressions from db
-    _logger.info("Get expressions from datamatrix from view %s and %s to execute logistic regression", view, name)
-
+    _logger.info("Get and cache datamatrix from view %s and name %s to execute Logistic Regression", view, name)
     df_expressions = get_filter_cache_datamatrix(_config["minio"], bucket_datamatrix, file_datamatrix, view, items)
-
-    #df_attributes = get_filter_attributes(df_expressions)
 
     # parse group collection to dataframe
     sample_groups = pd.json_normalize(sample_group_lst)
 
     # merge expression with group dataframes
     df_expressions = df_expressions.merge(sample_groups, how='inner', on='sample_id')
-    #df_expressions = df_expressions.sort_values('group_id', ascending=True,)
+    df_expressions = df_expressions.sort_values('group_id', ascending=True)
 
     # get logistic regression subdataframes to be trained
     X = df_expressions.iloc[:,1:-1]
@@ -436,10 +412,10 @@ def logistic_regression():
         df_mean_expressions = df_sub_expression.groupby(by=["group_id"]).mean()
         df_standard_deviation_expressions = df_sub_expression.groupby(by=["group_id"]).std()
         
-        #analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
-        #analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
-        analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
-        analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
+        analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
+        analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
+        #analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
+        #analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
 
         response.append(
             {
