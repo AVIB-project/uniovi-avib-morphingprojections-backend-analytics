@@ -128,7 +128,7 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
             )
 
             #cache[file_key] = file_data
-            cache[file_key] = df_datamatrix
+            cache[file_key] = df_datamatrix.compute()
 
             _logger.info("Reading from file " + file_key)
         else:
@@ -185,7 +185,7 @@ def get_filter_cache_annotation(config, bucket, key):
                 }
             )
 
-            cache[file_key] = df_annotation
+            cache[file_key] = df_annotation.compute()
 
             _logger.info("Reading from file " + file_key)           
         else:
@@ -274,8 +274,8 @@ def histogram():
     for group in groups:
         # create filtered dataframe for each group items
         items = np.array(group["values"]) 
-        #df_group = pd.DataFrame(data = items, columns = ["sample_id"])
-        df_group = dd.from_array(items, columns=['sample_id'])
+        df_group = pd.DataFrame(data = items, columns = ["sample_id"])
+        #df_group = dd.from_array(items, columns=['sample_id'])
 
         # add sample annotation metadata to groups
         df_expression_grouped = df_expression.merge(df_group, on=["sample_id"])
@@ -290,8 +290,8 @@ def histogram():
                 data["annotation"] = index
                 data["group"] = group["name"]
                 data["color"] = group["color"]
-                #data["value"] = int(df_expression_hist[index])
-                data["value"] = int(df_expression_hist[index].compute().values)
+                data["value"] = int(df_expression_hist[index])
+                #data["value"] = int(df_expression_hist[index].compute().values)
 
                 lst_histogram.append(data)            
         else:            
@@ -304,8 +304,8 @@ def histogram():
                 data["annotation"] = str(index.mid)
                 data["group"] = group["name"]
                 data["color"] = group["color"]
-                #data["value"] = int(df_expression_hist[index])
-                data["value"] = int(df_expression_hist[index].compute().values)
+                data["value"] = int(df_expression_hist[index])
+                #data["value"] = int(df_expression_hist[index].compute().values)
 
                 lst_histogram.append(data)            
         
@@ -403,10 +403,10 @@ def logistic_regression():
         df_mean_expressions = df_sub_expression.groupby(by=["group_id"]).mean()
         df_standard_deviation_expressions = df_sub_expression.groupby(by=["group_id"]).std()
         
-        #analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
-        #analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
-        analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
-        analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
+        analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
+        analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
+        #analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
+        #analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
 
         response.append(
             {
