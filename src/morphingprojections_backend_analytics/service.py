@@ -112,14 +112,12 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
     with shelve.open(CACHE_FOLDER + "/" + cache_db, flag='c', writeback=False) as cache:        
         if file_key not in cache:              
             # download file from minio and cache locally
-            file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
+            '''file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
             file_data = file_stream['Body'].read() 
 
-            # parse parquet cache file to dataframe
-            #df_datamatrix = pd.read_parquet(BytesIO(cache[file_key]))                
-            df_datamatrix = pd.read_csv(BytesIO(file_data))                
+            df_datamatrix = pd.read_csv(BytesIO(file_data))'''
 
-            '''df_datamatrix = dd.read_csv(
+            df_datamatrix = dd.read_csv(
                 "s3://" + bucket + "/" + key,
                 blocksize="100MB",
                 storage_options={
@@ -127,7 +125,7 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
                     "secret": config["secret_key"],
                     "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
                 }
-            )'''
+            )
 
             #cache[file_key] = file_data
             cache[file_key] = df_datamatrix
@@ -171,29 +169,25 @@ def get_filter_cache_annotation(config, bucket, key):
     # Check if the file key is already in the cache
     with shelve.open(CACHE_FOLDER + "/" + cache_db) as cache:        
         if file_key not in cache:
-            try: 
-                # download file from minio and cache locally
-                file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
-                file_data = file_stream['Body'].read() 
+            # download file from minio and cache locally
+            '''file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
+            file_data = file_stream['Body'].read() 
 
-                df_annotation = pd.read_csv(BytesIO(file_data)) 
+            df_annotation = pd.read_csv(BytesIO(file_data))'''
 
-                '''df_annotation = dd.read_csv(
-                    "s3://" + bucket + "/" + key,
-                    blocksize="100MB",
-                    storage_options={
-                        "key": config["access_key"],
-                        "secret": config["secret_key"],
-                        "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
-                    }
-                )'''
+            df_annotation = dd.read_csv(
+                "s3://" + bucket + "/" + key,
+                blocksize="100MB",
+                storage_options={
+                    "key": config["access_key"],
+                    "secret": config["secret_key"],
+                    "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
+                }
+            )
 
-                cache[file_key] = df_annotation
+            cache[file_key] = df_annotation
 
-                _logger.info("Reading from file " + file_key)
-            except Exception as err:                
-                cache.close()
-                return err                
+            _logger.info("Reading from file " + file_key)           
         else:
             # If in the cache, retrieve the content from the cache
             _logger.info("Reading from cache " + file_key)
@@ -201,10 +195,6 @@ def get_filter_cache_annotation(config, bucket, key):
         df_annotation = cache[file_key]
 
         return df_annotation
-
-def get_filter_attributes(df_expressions):
-    # return the columns (attributes) without the first one (sample_id)
-    return df_expressions.drop(df_expressions.columns[0],axis=1).columns
 
 @app.route('/')
 def health():
@@ -284,8 +274,8 @@ def histogram():
     for group in groups:
         # create filtered dataframe for each group items
         items = np.array(group["values"]) 
-        df_group = pd.DataFrame(data = items, columns = ["sample_id"])
-        #df_group = dd.from_array(items, columns=['sample_id'])
+        #df_group = pd.DataFrame(data = items, columns = ["sample_id"])
+        df_group = dd.from_array(items, columns=['sample_id'])
 
         # add sample annotation metadata to groups
         df_expression_grouped = df_expression.merge(df_group, on=["sample_id"])
@@ -300,8 +290,8 @@ def histogram():
                 data["annotation"] = index
                 data["group"] = group["name"]
                 data["color"] = group["color"]
-                data["value"] = int(df_expression_hist[index])
-                #data["value"] = int(df_expression_hist[index].compute().values)
+                #data["value"] = int(df_expression_hist[index])
+                data["value"] = int(df_expression_hist[index].compute().values)
 
                 lst_histogram.append(data)            
         else:            
@@ -314,7 +304,8 @@ def histogram():
                 data["annotation"] = str(index.mid)
                 data["group"] = group["name"]
                 data["color"] = group["color"]
-                data["value"] = int(df_expression_hist[index])
+                #data["value"] = int(df_expression_hist[index])
+                data["value"] = int(df_expression_hist[index].compute().values)
 
                 lst_histogram.append(data)            
         
@@ -412,10 +403,10 @@ def logistic_regression():
         df_mean_expressions = df_sub_expression.groupby(by=["group_id"]).mean()
         df_standard_deviation_expressions = df_sub_expression.groupby(by=["group_id"]).std()
         
-        analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
-        analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
-        #analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
-        #analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
+        #analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
+        #analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
+        analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
+        analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
 
         response.append(
             {
