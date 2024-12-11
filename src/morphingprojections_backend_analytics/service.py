@@ -1,11 +1,9 @@
 import os
-import gc
 import sys
 import time
 import argparse
 import logging
 import shelve
-import dbm
 from io import BytesIO
 from itertools import islice
 
@@ -13,22 +11,23 @@ from pyaml_env import parse_config
 
 import numpy as np
 import pandas as pd
-import dask.dataframe as dd
+#import dask.dataframe as dd
 
-from flask import Flask, jsonify, request
+import pyarrow.parquet as pq
 
-import boto3
+from minio import Minio
+from minio.error import MinioException
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.manifold import TSNE
+
+from flask import Flask, jsonify, request
 
 __author__ = "Miguel Salinas Gancedo"
 __copyright__ = "Miguel Salinas Gancedo"
 __license__ = "MIT"
 
-CACHE_FOLDER = "./src/morphingprojections_backend_analytics/.cache"
-MAX_REGRESION_VALUES = 100
+_CACHE_FOLDER = "./src/morphingprojections_backend_analytics/.cache"
+_MAX_REGRESION_VALUES = 100
 
 _logger = logging.getLogger(__name__)
 
@@ -52,7 +51,7 @@ def parse_args(args):
     Returns:
       :obj:`argparse.Namespace`: command line parameters namespace
     """
-    parser = argparse.ArgumentParser(description="Analytics Backend services")
+    parser = argparse.ArgumentParser(description="Analytics Backend Service")
     parser.add_argument(
         "-p",
         "--port",
@@ -83,40 +82,45 @@ def setup_logging(loglevel):
     )
 
 def connect_object_storage(config):
-    return boto3.client('s3',
-        endpoint_url=str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]),
-        aws_access_key_id=config["access_key"],
-        aws_secret_access_key=config["secret_key"],
-        verify=False,
-        region_name='us-east-1')  
+    return Minio(str(config["host"]) + ":" + str(config["port"]),
+        access_key=config["access_key"],
+        secret_key=config["secret_key"],
+        cert_check=False)        
 
 def get_filter_cache_datamatrix(config, bucket, key, view, items):
     # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
-    keys = key.split('/')
+    key_tokens = key.split('/')
 
     organization_id = bucket
-    project_id = keys[0]
-    case_id = keys[1]
-    file_name = keys[2]
+    project_id = key_tokens[0]
+    case_id = key_tokens[1]
+    file_name = key_tokens[2]
+
+    file_name_tokens = file_name.split('.')
+    file_name = file_name_tokens[0] + ".parquet"
+    key = project_id + "/" + case_id + "/" + file_name
 
     # get file last modify metadata to create a unique file key to be cached
-    response = _client_minio.head_object(Bucket=bucket, Key=key)
-    datetime_value = response["LastModified"]
-    
+    response = _client_minio.stat_object(bucket_name=bucket, object_name=key)    
+    datetime_value = response.last_modified
+
      # create a cache file per organization/project/case + minio last update
     cache_db = "cache_" + organization_id + "_" + project_id + "_" + case_id
     cache_file = cache_db + "_" + file_name
     file_key = cache_file + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
 
     # Check if the file key is already in the case cache db
-    with shelve.open(CACHE_FOLDER + "/" + cache_db, flag='c', writeback=False) as cache:        
+    with shelve.open(_CACHE_FOLDER + "/" + cache_db, flag='c', writeback=False) as cache:        
         if file_key not in cache:              
             # download file from minio and cache locally
-            '''file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
-            file_data = file_stream['Body'].read() 
+            file_stream = _client_minio.get_object(bucket_name=bucket, object_name=key)
 
-            df_datamatrix = pd.read_csv(BytesIO(file_data))'''
+            #df_datamatrix = pd.read_csv(BytesIO(file_stream.read()))
 
+            table = pq.read_table(BytesIO(file_stream.read()))
+            df_datamatrix = table.to_pandas()
+
+            '''
             df_datamatrix = dd.read_csv(
                 "s3://" + bucket + "/" + key,
                 blocksize="100MB",
@@ -126,9 +130,9 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
                     "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
                 }
             )
+            '''          
 
-            #cache[file_key] = file_data
-            cache[file_key] = df_datamatrix.compute()
+            cache[file_key] = df_datamatrix            
 
             _logger.info("Reading from file " + file_key)
         else:
@@ -158,8 +162,9 @@ def get_filter_cache_annotation(config, bucket, key):
     case_id = keys[1]
     file_name = keys[2]
 
-    response = _client_minio.head_object(Bucket=bucket, Key=key)
-    datetime_value = response["LastModified"]
+    # get file last modify metadata to create a unique file key to be cached
+    response = _client_minio.stat_object(bucket_name=bucket, object_name=key)    
+    datetime_value = response.last_modified
 
     # get file last modify metadata to create a unique file key to be cached
     cache_db = "cache_" + organization_id + "_" + project_id + "_" + case_id
@@ -167,14 +172,15 @@ def get_filter_cache_annotation(config, bucket, key):
     file_key = cache_file + "_" + datetime_value.strftime("%Y%m%d%H%M%S")
 
     # Check if the file key is already in the cache
-    with shelve.open(CACHE_FOLDER + "/" + cache_db) as cache:        
+    with shelve.open(_CACHE_FOLDER + "/" + cache_db) as cache:        
         if file_key not in cache:
             # download file from minio and cache locally
-            '''file_stream = _client_minio.get_object(Bucket=bucket, Key=key)
-            file_data = file_stream['Body'].read() 
+            file_stream = _client_minio.get_object(bucket_name=bucket, object_name=key)
 
-            df_annotation = pd.read_csv(BytesIO(file_data))'''
+            df_annotation = pd.read_csv(BytesIO(file_stream.read()))
+            #df_datamatrix = pd.read_parquet(BytesIO(file_stream.read()))
 
+            '''
             df_annotation = dd.read_csv(
                 "s3://" + bucket + "/" + key,
                 blocksize="100MB",
@@ -183,9 +189,9 @@ def get_filter_cache_annotation(config, bucket, key):
                     "secret": config["secret_key"],
                     "client_kwargs": {"endpoint_url": str(config["scheme"]) + "://" + str(config["host"]) + ":" + str(config["port"]), "verify": False}
                 }
-            )
+            )'''
 
-            cache[file_key] = df_annotation.compute()
+            cache[file_key] = df_annotation
 
             _logger.info("Reading from file " + file_key)           
         else:
@@ -396,7 +402,7 @@ def logistic_regression():
     d = sorted(d, reverse=True)
 
     # trunc and get the first 100 values
-    d = islice(d, MAX_REGRESION_VALUES)
+    d = islice(d, _MAX_REGRESION_VALUES)
 
     for index_d, regression in enumerate(d):
         df_sub_expression = df_expressions[[df_expressions.columns[index_d + 1], "group_id"]]

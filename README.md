@@ -39,8 +39,10 @@ $ source .venv/bin/activate
 
 ```
 $ pip install tox
-$ pip install numpy
+$ pip install pyaml-env
 $ pip install pandas
+$ pip install dask
+$ pip install pyarrow
 $ pip install scikit-learn
 $ pip install seaborn
 $ pip install flask
