@@ -4,6 +4,7 @@ import time
 import argparse
 import logging
 import shelve
+import json
 from io import BytesIO
 from itertools import islice
 
@@ -212,10 +213,9 @@ def health():
 def histogram():
     # start tracking
     start = time.time()
+    _logger.info("Start Histogram processing at time: " + str(start))
 
-    _logger.info("Get request data to execute histogram")
-
-    # get data from request parsed
+    # parse request
     data = request.get_json() 
 
     # get resource files
@@ -238,10 +238,10 @@ def histogram():
 
     # get annotation group selected: sample or attribute
     if data["filterType"] == 'filter_sample':
-        annotation = data["filterSampleAnnotation"]
+        annotation = data["filterSampleAnnotation"]    
         filter_by = "sample_annotation"
     else:        
-        annotation = data["filterAttributeAnnotation"]  
+        annotation = data["filterAttributeAnnotation"]
         filter_by = "attribute_annotation"
 
     # get number of bins selected (5 by default)
@@ -254,73 +254,51 @@ def histogram():
     for group in groups:
         items = items + group["values"]
 
-    _logger.info("Get and cache Datamatrix from view %s and name %s", view, name)
+    # get datamatrix from cache filtered  by items
+    _logger.info("Get and cache Datamatrix filtered by items from view %s and name %s", view, name)
     df_expression = get_filter_cache_datamatrix(_config["minio"], bucket_datamatrix, file_datamatrix, view, items)
         
-    # create expression dataframe from cache datamatrix and annotations cache file    
+    # create dataframe merged with annotations   
     if view == "sample_view": 
-        # get sample annotations dataframe (primal)
         _logger.info("Get and cache Sample Annotations")
         df_sample_annotation = get_filter_cache_annotation(_config["minio"], bucket_sample_annotation, file_sample_annotation)
         
-        # get expression dataframe merging filtered datamatrix dataframe with annotation dataframe from primal view
         _logger.info("Merge Datamatrix with Sample Annotations")
         df_expression = df_expression.merge(df_sample_annotation, how='inner', on='sample_id')
     else:
-        # get attribute annotations dataframe (dual)
         _logger.info("Get and cache Attribute Annotations")
         df_attribute_annotation = get_filter_cache_annotation(_config["minio"], bucket_attribute_annotation, file_attribute_annotation)
 
-        # get expression dataframe merging filtered datamatrix dataframe with attribute dataframe from dual view
         _logger.info("Merge Datamatrix with Attribute Annotations")
         df_expression = df_expression.merge(df_attribute_annotation, how='inner', on='attribute_id')
 
     # apply histogram analytics to expression dataframe
-    lst_histogram = []
+    df_expression_graph = pd.DataFrame()
     for group in groups:
-        # create filtered dataframe for each group items
-        items = np.array(group["values"]) 
-        df_group = pd.DataFrame(data = items, columns = ["sample_id"])
-        #df_group = dd.from_array(items, columns=['sample_id'])
+        # get items selected by group       
+        items = np.array(group["values"])
 
-        # add sample annotation metadata to groups
-        df_expression_grouped = df_expression.merge(df_group, on=["sample_id"])
-        
-        # create histogram
+        # filter datamatrix with selected items by group       
         if filter_by == "sample_annotation":
-            # histogram grouped by sample annotation
-            df_expression_hist = df_expression_grouped.groupby([annotation])[annotation].count()                        
-
-            for index in df_expression_hist.index:    
-                data = {}
-                data["annotation"] = index
-                data["group"] = group["name"]
-                data["color"] = group["color"]
-                data["value"] = int(df_expression_hist[index])
-                #data["value"] = int(df_expression_hist[index].compute().values)
-
-                lst_histogram.append(data)            
-        else:            
-            # histogram grouped by attribute annotation
-            df_expression_grouped["hist"]=pd.cut(df_expression_grouped[annotation], bins=bins)
-            df_expression_hist = df_expression_grouped.groupby(["hist"])["hist"].count() 
-
-            for index in df_expression_hist.index:    
-                data = {}
-                data["annotation"] = str(index.mid)
-                data["group"] = group["name"]
-                data["color"] = group["color"]
-                data["value"] = int(df_expression_hist[index])
-                #data["value"] = int(df_expression_hist[index].compute().values)
-
-                lst_histogram.append(data)            
+            df_expression_filtered_by_group = df_expression[df_expression["sample_id"].isin(items)] 
+        else:     
+            df_expression_filtered_by_group = df_expression[df_expression["attribute_id"].isin(items)]           
         
-    # order histogram by annotation
-    lst_histogram.sort(key=lambda item: item["annotation"])    
+        # datamatrix grouped by annotarion
+        df_expression_hist = df_expression_filtered_by_group.groupby(annotation).size().reset_index(name='value')
+        df_expression_hist["group"] = group["name"]
+        df_expression_hist["color"] = group["color"]        
+        df_expression_hist.rename(columns={annotation: "annotation"}, inplace=True) 
 
-    # timestamp track
-    end = time.time()
-    _logger.info("Histogram processing time: " + str(end - start))
+        # concatenate all group datamatrix                       
+        df_expression_graph = pd.concat([df_expression_hist, df_expression_graph], ignore_index=True)
+
+    # format group datamatrix
+    df_expression_graph = df_expression_graph.pivot(index=['group', 'color'], columns='annotation', values='value').fillna(0)
+    lst_histogram = df_expression_graph.reset_index().to_dict(orient='records')
+
+    # end histogram
+    _logger.info("End Histogram processing at time: " + str(time.time() - start))
 
     return lst_histogram
 
@@ -328,8 +306,7 @@ def histogram():
 def logistic_regression():
     # start tracking
     start = time.time()
-
-    _logger.info("Get request data to execute logistic regression")
+    _logger.info("Start Logistic Regression processing at time: " + str(start))
 
     # get data from request parsed
     data = request.get_json() 
@@ -352,18 +329,9 @@ def logistic_regression():
     view = data["view"] # get view type: sample_view (primal), attribute_view (dual)
     groups = data['groups']
 
-    # get annotations filters from request
-    sample_annotation = None
-    if "filterSampleAnnotation" in data:   
-        sample_annotation = data["filterSampleAnnotation"]
-
-    attribute_annotation = None
-    if "filterAttributeAnnotation" in data:           
-        attribute_annotation = data["filterAttributeAnnotation"] 
-
     # aggregate all items from groups
     items = []
-    for index, group in  enumerate(groups):
+    for group in groups:
         items = items + group["values"]
 
     sample_group_lst = []
@@ -371,8 +339,8 @@ def logistic_regression():
         for sample_id in group["values"]:
             sample_group_lst.append({'sample_id': sample_id, 'group_id': index_group})        
 
-    # get expressions from db
-    _logger.info("Get and cache datamatrix from view %s and name %s to execute Logistic Regression", view, name)
+    # get datamatrix from cache filtered  by items
+    _logger.info("Get and cache Datamatrix filtered by items from view %s and name %s", view, name)
     df_expressions = get_filter_cache_datamatrix(_config["minio"], bucket_datamatrix, file_datamatrix, view, items)
 
     # parse group collection to dataframe
@@ -393,17 +361,13 @@ def logistic_regression():
     
     # normalize logistic regression results
     d = np.abs(d) # set absolute values
-    d = d/np.max(np.max(d)) # Normalize dataframe
+    d = d/np.max(d) # Normalize dataframe
     d = d[0]
     
-    response = []
-
-    # sort results
-    d = sorted(d, reverse=True)
-
     # trunc and get the first 100 values
     d = islice(d, _MAX_REGRESION_VALUES)
 
+    response = []
     for index_d, regression in enumerate(d):
         df_sub_expression = df_expressions[[df_expressions.columns[index_d + 1], "group_id"]]
         df_mean_expressions = df_sub_expression.groupby(by=["group_id"]).mean()
@@ -411,8 +375,6 @@ def logistic_regression():
         
         analytics_a = str(round(df_mean_expressions.values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[0][0], 2))
         analytics_b = str(round(df_mean_expressions.values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.values[1][0], 2))
-        #analytics_a = str(round(df_mean_expressions.compute().values[0][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[0][0], 2))
-        #analytics_b = str(round(df_mean_expressions.compute().values[1][0], 2)) + "±" + str(round(df_standard_deviation_expressions.compute().values[1][0], 2))
 
         response.append(
             {
@@ -422,7 +384,7 @@ def logistic_regression():
                 "value": regression
             }) 
 
-    #response.sort(key=lambda x: x["value"], reverse=True)
+    response.sort(key=lambda x: x["value"], reverse=True)
 
     # end tracking
     end = time.time()
