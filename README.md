@@ -76,7 +76,7 @@ docker tag uniovi-avib-morphingprojections-backend-analytics:1.0.0 avibdocker.az
 docker push uniovi-avib-morphingprojections-backend-analytics:1.0.0
 ```
 
-build image for local minikube environment:
+build image for local minikube environment: 
 
 ```
 docker build --build-arg ARG_PYTHON_PROFILES_ACTIVE=minikube -t uniovi-avib-morphingprojections-backend-analytics:1.0.0 .
