@@ -54,3 +54,5 @@ MANIFEST
 .python-version
 
 src/morphingprojections_backend_analytics/.cache/*
+
+*/.cache/*
