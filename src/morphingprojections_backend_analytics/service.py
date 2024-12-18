@@ -364,9 +364,6 @@ def logistic_regression():
     d = d/np.max(d) # Normalize dataframe
     d = d[0]
     
-    # trunc and get the first 100 values
-    d = islice(d, _MAX_REGRESION_VALUES)
-
     response = []
     for index_d, regression in enumerate(d):
         df_sub_expression = df_expressions[[df_expressions.columns[index_d + 1], "group_id"]]
@@ -385,6 +382,8 @@ def logistic_regression():
             }) 
 
     response.sort(key=lambda x: x["value"], reverse=True)
+
+    response = response[:_MAX_REGRESION_VALUES]
 
     # end tracking
     end = time.time()
