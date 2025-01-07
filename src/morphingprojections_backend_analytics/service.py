@@ -259,18 +259,26 @@ def histogram():
     df_expression = get_filter_cache_datamatrix(_config["minio"], bucket_datamatrix, file_datamatrix, view, items)
         
     # create dataframe merged with annotations   
-    if view == "sample_view": 
-        _logger.info("Get and cache Sample Annotations")
-        df_sample_annotation = get_filter_cache_annotation(_config["minio"], bucket_sample_annotation, file_sample_annotation)
+    if view == "sample_view":
+        if filter_by == "sample_annotation":
+            _logger.info("Get and cache Sample Annotations")
+            df_sample_annotation = get_filter_cache_annotation(_config["minio"], bucket_sample_annotation, file_sample_annotation)
         
-        _logger.info("Merge Datamatrix with Sample Annotations")
-        df_expression = df_expression.merge(df_sample_annotation, how='inner', on='sample_id')
+            _logger.info("Merge Datamatrix with Sample Annotations")
+            df_expression = df_expression.merge(df_sample_annotation, how='inner', on='sample_id')
+        else:
+            _logger.info("Filte by Attribute Annotation")
+            df_expression = df_expression.loc[:,["sample_id", annotation]]
     else:
-        _logger.info("Get and cache Attribute Annotations")
-        df_attribute_annotation = get_filter_cache_annotation(_config["minio"], bucket_attribute_annotation, file_attribute_annotation)
+        if filter_by == "sample_annotation":
+            _logger.info("Get and cache Attribute Annotations")
+            df_attribute_annotation = get_filter_cache_annotation(_config["minio"], bucket_attribute_annotation, file_attribute_annotation)
 
-        _logger.info("Merge Datamatrix with Attribute Annotations")
-        df_expression = df_expression.merge(df_attribute_annotation, how='inner', on='attribute_id')
+            _logger.info("Merge Datamatrix with Attribute Annotations")
+            df_expression = df_expression.merge(df_attribute_annotation, how='inner', on='attribute_id')
+        else:
+            _logger.info("Filte by Sample Annotation")
+            df_expression = df_expression.loc[:,["attribute_id", annotation]]
 
     # apply histogram analytics to expression dataframe
     df_expression_graph = pd.DataFrame()
@@ -279,19 +287,32 @@ def histogram():
         items = np.array(group["values"])
 
         # filter datamatrix with selected items by group       
-        if filter_by == "sample_annotation":
+        if view == "sample_view":
             df_expression_filtered_by_group = df_expression[df_expression["sample_id"].isin(items)] 
         else:     
             df_expression_filtered_by_group = df_expression[df_expression["attribute_id"].isin(items)]           
         
         # datamatrix grouped by annotarion
-        df_expression_hist = df_expression_filtered_by_group.groupby(annotation).size().reset_index(name='value')
-        df_expression_hist["group"] = group["name"]
-        df_expression_hist["color"] = group["color"]        
-        df_expression_hist.rename(columns={annotation: "annotation"}, inplace=True) 
+        if filter_by == "sample_annotation":
+            df_expression_hist = df_expression_filtered_by_group.groupby(annotation).size().reset_index(name='value')
+            df_expression_hist["group"] = group["name"]
+            df_expression_hist["color"] = group["color"]        
+            df_expression_hist.rename(columns={annotation: "annotation"}, inplace=True) 
 
-        # concatenate all group datamatrix                       
-        df_expression_graph = pd.concat([df_expression_hist, df_expression_graph], ignore_index=True)
+            # concatenate all group datamatrix                       
+            df_expression_graph = pd.concat([df_expression_hist, df_expression_graph], ignore_index=True)            
+        else:     
+            df_expression_filtered_by_group['annotation'] = pd.cut(df_expression_filtered_by_group[annotation], bins=bins)
+            df_expression_hist = df_expression_filtered_by_group.groupby('annotation').count()
+            df_expression_hist = df_expression_hist.reset_index()            
+            df_expression_hist["annotation"] = df_expression_hist["annotation"].astype('string')
+            df_expression_hist = df_expression_hist.drop(['sample_id'], axis=1)
+            df_expression_hist.rename(columns={annotation: "value"}, inplace=True)
+            df_expression_hist["group"] = group["name"]
+            df_expression_hist["color"] = group["color"]            
+
+            # concatenate all group datamatrix                       
+            df_expression_graph = pd.concat([df_expression_hist, df_expression_graph])
 
     # format group datamatrix
     df_expression_graph = df_expression_graph.pivot(index=['group', 'color'], columns='annotation', values='value').fillna(0)
