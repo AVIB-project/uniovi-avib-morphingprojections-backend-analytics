@@ -1,6 +1,6 @@
 minio:
   scheme: http
   host: localhost
-  port: 9010
+  port: 9000
   access_key: admin
   secret_key: password

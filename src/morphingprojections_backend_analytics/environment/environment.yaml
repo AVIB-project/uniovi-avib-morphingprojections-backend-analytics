@@ -1,6 +1,6 @@
 minio:
-  scheme: https
-  host: localhost
+  scheme: http
+  host: avib-minio
   port: 9000
-  access_key: WRc6I2ubSt9iZ0P6
-  secret_key: AOm7m0CaFaeO5RW74jhzYEvxB6A0FK4P
+  access_key: admin
+  secret_key: password 

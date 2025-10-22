@@ -4,15 +4,12 @@ import time
 import argparse
 import logging
 import shelve
-import json
 from io import BytesIO
-from itertools import islice
 
 from pyaml_env import parse_config
 
 import numpy as np
 import pandas as pd
-#import dask.dataframe as dd
 
 import pyarrow.parquet as pq
 
@@ -33,10 +30,10 @@ _MAX_REGRESION_VALUES = 100
 _logger = logging.getLogger(__name__)
 
 # get environment variables from active profile            
-if not os.getenv('ARG_PYTHON_PROFILES_ACTIVE'):
+if not os.getenv('PYTHON_PROFILES_ACTIVE'):
     _config = parse_config('./src/morphingprojections_backend_analytics/environment/environment.yaml')        
 else:
-    _config = parse_config('./src/morphingprojections_backend_analytics/environment/environment-' + os.getenv('ARG_PYTHON_PROFILES_ACTIVE') + '.yaml')
+    _config = parse_config('./src/morphingprojections_backend_analytics/environment/environment-' + os.getenv('PYTHON_PROFILES_ACTIVE') + '.yaml')
 
 app = Flask(__name__)
 

@@ -1,6 +1,0 @@
-minio:
-  scheme: https
-  host: gsdpi-hl.default.svc.cluster.local
-  port: 9000
-  access_key: WRc6I2ubSt9iZ0P6
-  secret_key: AOm7m0CaFaeO5RW74jhzYEvxB6A0FK4P
