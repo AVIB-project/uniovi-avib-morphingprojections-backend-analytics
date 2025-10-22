@@ -83,7 +83,7 @@ def connect_object_storage(config):
     return Minio(str(config["host"]) + ":" + str(config["port"]),
         access_key=config["access_key"],
         secret_key=config["secret_key"],
-        cert_check=False)        
+        secure=False)       
 
 def get_filter_cache_datamatrix(config, bucket, key, view, items):
     # get file name from key. The bucker is the organizationId and the key has this structure: projectId/caseId/fileName
@@ -95,7 +95,8 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
     file_name = key_tokens[2]
 
     file_name_tokens = file_name.split('.')
-    file_name = file_name_tokens[0] + ".parquet"
+    #file_name = file_name_tokens[0] + ".parquet"
+    file_name = file_name_tokens[0] + ".csv"
     key = project_id + "/" + case_id + "/" + file_name
 
     # get file last modify metadata to create a unique file key to be cached
@@ -113,10 +114,10 @@ def get_filter_cache_datamatrix(config, bucket, key, view, items):
             # download file from minio and cache locally
             file_stream = _client_minio.get_object(bucket_name=bucket, object_name=key)
 
-            #df_datamatrix = pd.read_csv(BytesIO(file_stream.read()))
+            df_datamatrix = pd.read_csv(BytesIO(file_stream.read()))
 
-            table = pq.read_table(BytesIO(file_stream.read()))
-            df_datamatrix = table.to_pandas()
+            #table = pq.read_table(BytesIO(file_stream.read()))
+            #df_datamatrix = table.to_pandas()
 
             '''
             df_datamatrix = dd.read_csv(
